@@ -1,0 +1,31 @@
+{
+  "runId": "8c561107-fde2-43d2-a372-3a985d7f4125",
+  "status": "failed",
+  "mode": "dry-run",
+  "createdAt": "2026-02-19T09:40:25.558Z",
+  "options": {
+    "dryRun": true,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 5,
+    "concurrency": 5,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 0,
+    "parsed": 0,
+    "created": 0,
+    "updated": 0,
+    "skipped": 0,
+    "errored": 0,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "updatedAt": "2026-02-19T09:40:25.560Z"
+  },
+  "items": [],
+  "startedAt": "2026-02-19T09:40:25.560Z",
+  "finishedAt": "2026-02-19T09:40:25.726Z",
+  "error": "The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint."
+}

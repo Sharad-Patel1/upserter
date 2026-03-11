@@ -1,0 +1,119 @@
+{
+  "runId": "b79ceb87-3951-471c-930b-2522de4f0f7f",
+  "status": "completed",
+  "mode": "dry-run",
+  "createdAt": "2026-02-19T08:42:59.463Z",
+  "options": {
+    "dryRun": true,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 5,
+    "concurrency": 5,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 5,
+    "parsed": 5,
+    "created": 0,
+    "updated": 0,
+    "skipped": 0,
+    "errored": 5,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "lastProcessedKey": "enriched_new/0961C.json",
+    "updatedAt": "2026-02-19T08:42:59.860Z"
+  },
+  "items": [
+    {
+      "key": "enriched_new/0271d00480c4.json",
+      "externalRef": "0271d00480c4",
+      "action": "error_runtime",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "ClickHome request failed: POST V2/AdminSetup/TenderOptions/List",
+      "startedAt": "2026-02-19T08:42:59.632Z",
+      "finishedAt": "2026-02-19T08:42:59.805Z",
+      "latencyMs": 173,
+      "audit": {
+        "mappedPayloadHash": "54c9cb1847f17ee96ac219b73e3dd47805a47824a15cb12cd239bb197670c660"
+      }
+    },
+    {
+      "key": "enriched_new/100131.json",
+      "action": "error_validation",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "Missing required fields optionName and/or categoryId",
+      "startedAt": "2026-02-19T08:42:59.633Z",
+      "finishedAt": "2026-02-19T08:42:59.806Z",
+      "latencyMs": 173
+    },
+    {
+      "key": "enriched_new/100141.json",
+      "action": "error_validation",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "Missing required fields optionName and/or categoryId",
+      "startedAt": "2026-02-19T08:42:59.633Z",
+      "finishedAt": "2026-02-19T08:42:59.819Z",
+      "latencyMs": 186
+    },
+    {
+      "key": "enriched_new/0962B.json",
+      "externalRef": "0962B",
+      "action": "error_runtime",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "ClickHome request failed: POST V2/AdminSetup/TenderOptions/List",
+      "startedAt": "2026-02-19T08:42:59.633Z",
+      "finishedAt": "2026-02-19T08:42:59.851Z",
+      "latencyMs": 218,
+      "audit": {
+        "mappedPayloadHash": "532d2cbfb6d1fd6f5772869b40367e4054a3f1c6321d347b89320b7ce9097a4e"
+      }
+    },
+    {
+      "key": "enriched_new/0961C.json",
+      "externalRef": "0961C",
+      "action": "error_runtime",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "ClickHome request failed: POST V2/AdminSetup/TenderOptions/List",
+      "startedAt": "2026-02-19T08:42:59.632Z",
+      "finishedAt": "2026-02-19T08:42:59.859Z",
+      "latencyMs": 227,
+      "audit": {
+        "mappedPayloadHash": "df9e3ced654b5f0e0f50be27be5ecd8ab6dd9f20309e6f588c7e984791c35086"
+      }
+    }
+  ],
+  "startedAt": "2026-02-19T08:42:59.464Z",
+  "finishedAt": "2026-02-19T08:42:59.860Z"
+}

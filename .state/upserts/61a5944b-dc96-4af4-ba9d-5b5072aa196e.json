@@ -1,0 +1,74 @@
+{
+  "runId": "61a5944b-dc96-4af4-ba9d-5b5072aa196e",
+  "status": "completed",
+  "mode": "dry-run",
+  "createdAt": "2026-03-11T02:07:46.069Z",
+  "options": {
+    "dryRun": true,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 1,
+    "concurrency": 10,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 1,
+    "parsed": 1,
+    "created": 0,
+    "updated": 1,
+    "skipped": 0,
+    "errored": 0,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "lastProcessedKey": "enriched_new/025c03dafbe0.json",
+    "updatedAt": "2026-03-11T02:07:48.841Z"
+  },
+  "items": [
+    {
+      "key": "enriched_new/025c03dafbe0.json",
+      "externalRef": "025c03dafbe0",
+      "action": "update_dry_run",
+      "decision": {
+        "action": "update",
+        "reason": "Tracked fields changed",
+        "optionId": 36305,
+        "jsonPatchOperations": [
+          {
+            "op": "replace",
+            "path": "/optionAvailable",
+            "value": "2026-03-11T02:07:48.154Z"
+          },
+          {
+            "op": "replace",
+            "path": "/optionExpired",
+            "value": "9999-12-31T23:59:59Z"
+          }
+        ],
+        "mergePatchObject": {
+          "optionAvailable": "2026-03-11T02:07:48.154Z",
+          "optionExpired": "9999-12-31T23:59:59Z"
+        }
+      },
+      "optionId": 36305,
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "startedAt": "2026-03-11T02:07:47.797Z",
+      "finishedAt": "2026-03-11T02:07:48.840Z",
+      "latencyMs": 1043,
+      "audit": {
+        "mappedPayloadHash": "9eb3e3e943f75dce12d8071bb6ee83e2b034cf75f35977f596560993df92fb7d",
+        "jsonPatchHash": "5509469f9f1fac8b1ef2041b25761edad901c97f30fb1d3ee91335a1a7f2e6ff",
+        "mergePayloadHash": "75b4773c3b1fdccc74b013f2cf1ac80ca08fb1017b1583e108446bd656a8f8bc"
+      }
+    }
+  ],
+  "startedAt": "2026-03-11T02:07:46.080Z",
+  "finishedAt": "2026-03-11T02:07:48.841Z"
+}

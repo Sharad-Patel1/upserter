@@ -1,0 +1,76 @@
+{
+  "runId": "73fcf0f1-d6b4-4263-a7c8-800a058b269a",
+  "status": "completed",
+  "mode": "apply",
+  "createdAt": "2026-03-11T02:08:21.128Z",
+  "options": {
+    "dryRun": false,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 1,
+    "concurrency": 10,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 1,
+    "parsed": 1,
+    "created": 0,
+    "updated": 1,
+    "skipped": 0,
+    "errored": 0,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "lastProcessedKey": "enriched_new/025c03dafbe0.json",
+    "updatedAt": "2026-03-11T02:08:23.743Z"
+  },
+  "items": [
+    {
+      "key": "enriched_new/025c03dafbe0.json",
+      "externalRef": "025c03dafbe0",
+      "action": "update",
+      "decision": {
+        "action": "update",
+        "reason": "Tracked fields changed",
+        "optionId": 36305,
+        "jsonPatchOperations": [
+          {
+            "op": "replace",
+            "path": "/optionAvailable",
+            "value": "2026-03-11T02:08:23.044Z"
+          },
+          {
+            "op": "replace",
+            "path": "/optionExpired",
+            "value": "9999-12-31T23:59:59Z"
+          }
+        ],
+        "mergePatchObject": {
+          "optionAvailable": "2026-03-11T02:08:23.044Z",
+          "optionExpired": "9999-12-31T23:59:59Z"
+        }
+      },
+      "optionId": 36305,
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "startedAt": "2026-03-11T02:08:22.764Z",
+      "finishedAt": "2026-03-11T02:08:23.742Z",
+      "latencyMs": 978,
+      "audit": {
+        "mappedPayloadHash": "7fff119e30c5bda598a56ab42ac5af7ef02d4d603d501dd0b05933ecb6f542d1",
+        "jsonPatchHash": "176cf2a9affa6664b1a29abbaf2ff65ddb4cb5c3952a89d2db3ab2932bfad2c2",
+        "mergePayloadHash": "78a5f6a2f41e6d4af63d16e7ee9108d4ada791022eb1635132b92f4acec9895c",
+        "patchStrategy": "merge-object",
+        "responseId": 36305
+      }
+    }
+  ],
+  "startedAt": "2026-03-11T02:08:21.134Z",
+  "finishedAt": "2026-03-11T02:08:23.743Z"
+}

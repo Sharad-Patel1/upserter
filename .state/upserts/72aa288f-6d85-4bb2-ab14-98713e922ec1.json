@@ -1,0 +1,51 @@
+{
+  "runId": "72aa288f-6d85-4bb2-ab14-98713e922ec1",
+  "status": "completed",
+  "mode": "apply",
+  "createdAt": "2026-03-11T01:39:43.466Z",
+  "options": {
+    "dryRun": false,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 1,
+    "concurrency": 10,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 1,
+    "parsed": 1,
+    "created": 0,
+    "updated": 0,
+    "skipped": 0,
+    "errored": 1,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "lastProcessedKey": "enriched_new/025c03dafbe0.json",
+    "updatedAt": "2026-03-11T01:39:45.975Z"
+  },
+  "items": [
+    {
+      "key": "enriched_new/025c03dafbe0.json",
+      "externalRef": "025c03dafbe0",
+      "action": "error_runtime",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "ClickHome request failed: PATCH V2/AdminSetup/TenderOptions/36305",
+      "startedAt": "2026-03-11T01:39:45.156Z",
+      "finishedAt": "2026-03-11T01:39:45.970Z",
+      "latencyMs": 814,
+      "audit": {
+        "mappedPayloadHash": "f9330a24d1ae00d56d238cf75057fe2e7be935c316bad45989a068583109fdab"
+      }
+    }
+  ],
+  "startedAt": "2026-03-11T01:39:43.472Z",
+  "finishedAt": "2026-03-11T01:39:45.975Z"
+}

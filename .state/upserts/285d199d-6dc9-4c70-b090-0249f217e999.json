@@ -1,0 +1,30 @@
+{
+  "runId": "285d199d-6dc9-4c70-b090-0249f217e999",
+  "status": "completed",
+  "mode": "dry-run",
+  "createdAt": "2026-02-19T09:39:55.398Z",
+  "options": {
+    "dryRun": true,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 5,
+    "concurrency": 5,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 0,
+    "parsed": 0,
+    "created": 0,
+    "updated": 0,
+    "skipped": 0,
+    "errored": 0,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "updatedAt": "2026-02-19T09:39:55.575Z"
+  },
+  "items": [],
+  "startedAt": "2026-02-19T09:39:55.399Z",
+  "finishedAt": "2026-02-19T09:39:55.575Z"
+}

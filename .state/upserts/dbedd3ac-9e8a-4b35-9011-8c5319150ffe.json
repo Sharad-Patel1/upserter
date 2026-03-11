@@ -1,0 +1,205 @@
+{
+  "runId": "dbedd3ac-9e8a-4b35-9011-8c5319150ffe",
+  "status": "completed",
+  "mode": "apply",
+  "createdAt": "2026-02-23T04:12:16.930Z",
+  "options": {
+    "dryRun": false,
+    "prefix": "enriched_new/**/*.json",
+    "limit": 10,
+    "concurrency": 10,
+    "fileConcurrency": 2,
+    "resumeFromCheckpoint": false
+  },
+  "totals": {
+    "scanned": 8,
+    "parsed": 8,
+    "created": 7,
+    "updated": 0,
+    "skipped": 0,
+    "errored": 1,
+    "filesUploaded": 0,
+    "filesSkipped": 0
+  },
+  "checkpoint": {
+    "lastProcessedKey": "enriched_new/300082.json",
+    "updatedAt": "2026-02-23T04:12:19.749Z"
+  },
+  "items": [
+    {
+      "key": "enriched_new/17051B.json",
+      "externalRef": "17051B",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 8
+      },
+      "startedAt": "2026-02-23T04:12:17.740Z",
+      "finishedAt": "2026-02-23T04:12:18.650Z",
+      "latencyMs": 910,
+      "audit": {
+        "mappedPayloadHash": "782b8e94b0060a13dbc454042b37b747a6e99262311b5cfe9047d586eccb4cee"
+      }
+    },
+    {
+      "key": "enriched_new/3K6-LF.json",
+      "externalRef": "3K6-LF",
+      "action": "error_runtime",
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 0
+      },
+      "error": "ClickHome request failed: POST V2/AdminSetup/TenderOptions",
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.471Z",
+      "latencyMs": 1730,
+      "audit": {
+        "mappedPayloadHash": "7a2e640fd23b4a2aa67a9ecb6937ce20a245be3f3499c2ede8de66403f263f52"
+      }
+    },
+    {
+      "key": "enriched_new/1X4540I.json",
+      "externalRef": "1X4540I",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 5
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.566Z",
+      "latencyMs": 1825,
+      "audit": {
+        "mappedPayloadHash": "685d1c3aa2e8b62fd3a279fd482ebb790bcafae2f7d584de632d7e244977f731"
+      }
+    },
+    {
+      "key": "enriched_new/400750-LF.json",
+      "externalRef": "400750-LF",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 12
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.593Z",
+      "latencyMs": 1852,
+      "audit": {
+        "mappedPayloadHash": "e12c5f0a9119667a783c81b62ee962d914d4f2f25cb4b0bc470117a56e2450f1"
+      }
+    },
+    {
+      "key": "enriched_new/1ISX100R.json",
+      "externalRef": "1ISX100R",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 4
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.615Z",
+      "latencyMs": 1874,
+      "audit": {
+        "mappedPayloadHash": "69df0ed6452c98330a6696907886005110dd3cbae76e5ec1639c18fa96b09b64"
+      }
+    },
+    {
+      "key": "enriched_new/300081.json",
+      "externalRef": "300081",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 5
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.638Z",
+      "latencyMs": 1897,
+      "audit": {
+        "mappedPayloadHash": "c24b6c2d59b8cf4c48c8e2ad3109a702f64605cfbd0a0a297f25492c73498700"
+      }
+    },
+    {
+      "key": "enriched_new/400710-LF.json",
+      "externalRef": "400710-LF",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 10
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.671Z",
+      "latencyMs": 1930,
+      "audit": {
+        "mappedPayloadHash": "f95b0509603d08dfd4c1dc628a5dd993ade95ed0c0e332881df9e5620430cccc"
+      }
+    },
+    {
+      "key": "enriched_new/300082.json",
+      "externalRef": "300082",
+      "action": "create",
+      "decision": {
+        "action": "create",
+        "reason": "No existing option found by external reference"
+      },
+      "files": {
+        "listedExisting": 0,
+        "uploaded": 0,
+        "skippedExisting": 0,
+        "failed": 0,
+        "wouldUpload": 4
+      },
+      "startedAt": "2026-02-23T04:12:17.741Z",
+      "finishedAt": "2026-02-23T04:12:19.747Z",
+      "latencyMs": 2006,
+      "audit": {
+        "mappedPayloadHash": "8ec2fc9eec10fb6bd5123907c226448addb6e0b95e61c8f43caa6237fdbd39dd"
+      }
+    }
+  ],
+  "startedAt": "2026-02-23T04:12:16.932Z",
+  "finishedAt": "2026-02-23T04:12:19.749Z"
+}

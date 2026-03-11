@@ -13,3 +13,14 @@ bun run dev
 ```
 
 Open http://localhost:3000/ with your browser to see the result.
+
+## Production Build
+To compile the API into a single executable for deployment run:
+```bash
+bun run build
+```
+
+This follows the Elysia deploy guidance and outputs a `server` binary that you can run directly:
+```bash
+./server
+```
