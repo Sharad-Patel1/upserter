@@ -17,6 +17,7 @@ export interface AppEnv {
   CLICKHOME_BUSINESS_UNIT_ID: number;
   CLICKHOME_RESOURCE_CODE: number;
   UPSERT_AUDIT_DB_PATH?: string;
+  UPSERTER_WEB_ORIGIN?: string;
 }
 
 const envSchema = z.object({
@@ -29,6 +30,7 @@ const envSchema = z.object({
   CLICKHOME_BUSINESS_UNIT_ID: z.coerce.number().int().nonnegative(),
   CLICKHOME_RESOURCE_CODE: z.coerce.number().int().nonnegative(),
   UPSERT_AUDIT_DB_PATH: z.string().min(1).optional(),
+  UPSERTER_WEB_ORIGIN: z.string().url().optional(),
 });
 
 function firstDefined(
@@ -57,6 +59,7 @@ function buildRawEnv(runtimeEnv: Record<string, string | undefined>): Record<str
     CLICKHOME_BUSINESS_UNIT_ID: runtimeEnv.CLICKHOME_BUSINESS_UNIT_ID,
     CLICKHOME_RESOURCE_CODE: firstDefined(runtimeEnv, ENV_ALIASES.CLICKHOME_RESOURCE_CODE),
     UPSERT_AUDIT_DB_PATH: runtimeEnv.UPSERT_AUDIT_DB_PATH,
+    UPSERTER_WEB_ORIGIN: runtimeEnv.UPSERTER_WEB_ORIGIN,
   };
 }
 

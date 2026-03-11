@@ -86,7 +86,14 @@ export function createApplication(dependencies: ApplicationDependencies = {}) {
       })
     )
     .use(createUpsertRoutes(upsertService))
-    .use(createObservabilityRoutes(observability, auditStore, upsertService));
+    .use(
+      createObservabilityRoutes(
+        observability,
+        auditStore,
+        upsertService,
+        env.UPSERTER_WEB_ORIGIN,
+      ),
+    );
 
   return {
     app,

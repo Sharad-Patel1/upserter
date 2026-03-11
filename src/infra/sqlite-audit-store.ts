@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { Database } from "bun:sqlite";
 
+import type { RunListEntry } from "@/types/api";
 import type { AuditContext, RunItemOutcome, RunReport } from "@/types/upsert";
 
 type NullableJsonValue = string | number | boolean | null | JsonValue[] | {
@@ -544,6 +545,48 @@ export class SqliteAuditStore {
       httpExchangeCount,
       fileSyncAttemptCount,
     };
+  }
+
+  listRecentRuns(limit = 25): RunListEntry[] {
+    const normalizedLimit = Math.max(1, Math.floor(limit));
+
+    return this.db
+      .query<{
+        run_id: string;
+        status: RunReport["status"];
+        mode: RunReport["mode"];
+        created_at: string;
+        started_at: string | null;
+        finished_at: string | null;
+        options_json: string;
+        totals_json: string;
+        checkpoint_json: string;
+        error_text: string | null;
+        item_count: number;
+      }, { limit: number }>(
+        `SELECT runs.run_id, runs.status, runs.mode, runs.created_at, runs.started_at,
+            runs.finished_at, runs.options_json, runs.totals_json, runs.checkpoint_json,
+            runs.error_text, COUNT(run_items.item_key) as item_count
+         FROM runs
+         LEFT JOIN run_items ON run_items.run_id = runs.run_id
+         GROUP BY runs.run_id
+         ORDER BY COALESCE(runs.started_at, runs.created_at) DESC, runs.created_at DESC
+         LIMIT $limit`,
+      )
+      .all({ limit: normalizedLimit })
+      .map((row) => ({
+        runId: row.run_id,
+        status: row.status,
+        mode: row.mode,
+        createdAt: row.created_at,
+        startedAt: row.started_at ?? undefined,
+        finishedAt: row.finished_at ?? undefined,
+        options: parseOptionalJson<RunReport["options"]>(row.options_json)!,
+        totals: parseOptionalJson<RunReport["totals"]>(row.totals_json)!,
+        checkpoint: parseOptionalJson<RunReport["checkpoint"]>(row.checkpoint_json)!,
+        itemCount: row.item_count ?? 0,
+        error: row.error_text ?? undefined,
+      }));
   }
 
   getRunItemDetail(runId: string, itemKey: string): AuditRunItemDetail {

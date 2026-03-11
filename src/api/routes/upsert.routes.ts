@@ -31,6 +31,15 @@ export function createUpsertRoutes(service: TenderOptionUpsertService) {
       }
     )
     .get(
+      "/runs",
+      ({ query }) => service.listRecentRuns(query.limit ?? 25),
+      {
+        query: t.Object({
+          limit: t.Optional(t.Numeric({ minimum: 1, maximum: 200 })),
+        }),
+      },
+    )
+    .get(
       "/runs/:runId",
       async ({ params, set }) => {
         const report = await service.getRun(params.runId);

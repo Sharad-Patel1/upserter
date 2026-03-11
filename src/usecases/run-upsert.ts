@@ -8,6 +8,7 @@ import { buildTenderOptionDiff } from "@/domain/diff";
 import { mapTenderOptionModel } from "@/domain/map-tender-option";
 import { normalizeEnrichedProduct } from "@/domain/normalize";
 import type { AppEnv } from "@/config/env";
+import type { RunListEntry, RunStreamEvent } from "@/types/api";
 import type {
   AppliedRunOptions,
   AuditContext,
@@ -42,6 +43,8 @@ interface ProcessItemResult {
   item: RunItemOutcome;
   parsed: boolean;
 }
+
+type RunStreamListener = (event: RunStreamEvent) => void;
 
 const FAR_FUTURE_ISO = "9999-12-31T23:59:59Z";
 
@@ -260,7 +263,8 @@ export class TenderOptionUpsertService {
   private readonly uuid: () => string;
   private readonly externalReferenceKey: string;
   private readonly activeRuns = new Map<string, Promise<void>>();
-  private readonly updateChains = new Map<string, Promise<void>>();
+  private readonly updateChains = new Map<string, Promise<unknown>>();
+  private readonly runStreamSubscribers = new Map<string, Set<RunStreamListener>>();
 
   constructor(dependencies: UpsertServiceDependencies) {
     this.env = dependencies.env;
@@ -291,6 +295,12 @@ export class TenderOptionUpsertService {
     };
 
     await this.runStore.createRun(report);
+    this.emitRunStreamEvent(runId, {
+      type: "run-status",
+      payload: {
+        report,
+      },
+    });
     this.observability?.incrementCounter("upsert.runs.total", 1, {
       phase: "queued",
       mode: report.mode,
@@ -323,12 +333,19 @@ export class TenderOptionUpsertService {
             error: message,
           },
         });
-        await this.enqueueUpdate(runId, (current) => ({
+        const failedReport = await this.enqueueUpdate(runId, (current) => ({
           ...current,
           status: "failed",
           finishedAt: this.now().toISOString(),
           error: message,
         }));
+        this.emitRunStreamEvent(runId, {
+          type: "run-status",
+          payload: {
+            report: failedReport,
+          },
+        });
+        this.emitTerminalEvent(failedReport);
       })
       .finally(() => {
         this.activeRuns.delete(runId);
@@ -346,6 +363,28 @@ export class TenderOptionUpsertService {
 
   async getRun(runId: string): Promise<RunReport | undefined> {
     return this.runStore.getRun(runId);
+  }
+
+  async listRecentRuns(limit = 25): Promise<RunListEntry[]> {
+    return this.auditStore?.listRecentRuns(limit) ?? [];
+  }
+
+  subscribeToRun(runId: string, listener: RunStreamListener): () => void {
+    const listeners = this.runStreamSubscribers.get(runId) ?? new Set<RunStreamListener>();
+    listeners.add(listener);
+    this.runStreamSubscribers.set(runId, listeners);
+
+    return () => {
+      const current = this.runStreamSubscribers.get(runId);
+      if (!current) {
+        return;
+      }
+
+      current.delete(listener);
+      if (current.size === 0) {
+        this.runStreamSubscribers.delete(runId);
+      }
+    };
   }
 
   getRuntimeSnapshot(): {
@@ -366,6 +405,35 @@ export class TenderOptionUpsertService {
       "upsert.pending_update_chains",
       this.updateChains.size,
     );
+  }
+
+  private emitRunStreamEvent(runId: string, event: RunStreamEvent): void {
+    const listeners = this.runStreamSubscribers.get(runId);
+    if (!listeners) {
+      return;
+    }
+
+    for (const listener of listeners) {
+      listener(event);
+    }
+  }
+
+  private emitTerminalEvent(report: RunReport): void {
+    if (
+      report.status !== "completed" &&
+      report.status !== "failed" &&
+      report.status !== "cancelled"
+    ) {
+      return;
+    }
+
+    this.emitRunStreamEvent(report.runId, {
+      type: "terminal",
+      payload: {
+        runId: report.runId,
+        status: report.status,
+      },
+    });
   }
 
   private buildAuditContext(
@@ -515,7 +583,7 @@ export class TenderOptionUpsertService {
 
   private async executeRun(runId: string, options: AppliedRunOptions): Promise<void> {
     const startedAt = Date.now();
-    await this.enqueueUpdate(runId, (current) => ({
+    const runningReport = await this.enqueueUpdate(runId, (current) => ({
       ...current,
       status: "running",
       startedAt: this.now().toISOString(),
@@ -524,6 +592,12 @@ export class TenderOptionUpsertService {
         updatedAt: this.now().toISOString(),
       },
     }));
+    this.emitRunStreamEvent(runId, {
+      type: "run-status",
+      payload: {
+        report: runningReport,
+      },
+    });
     this.observability?.incrementCounter("upsert.runs.total", 1, {
       phase: "started",
       mode: options.dryRun ? "dry-run" : "apply",
@@ -587,7 +661,7 @@ export class TenderOptionUpsertService {
     await Promise.all(running);
     await this.awaitPendingUpdates(runId);
 
-    await this.enqueueUpdate(runId, (current) => ({
+    const completedReport = await this.enqueueUpdate(runId, (current) => ({
       ...current,
       status: "completed",
       finishedAt: this.now().toISOString(),
@@ -596,6 +670,12 @@ export class TenderOptionUpsertService {
         updatedAt: this.now().toISOString(),
       },
     }));
+    this.emitRunStreamEvent(runId, {
+      type: "run-status",
+      payload: {
+        report: completedReport,
+      },
+    });
     this.observability?.incrementCounter("upsert.runs.total", 1, {
       phase: "completed",
       mode: options.dryRun ? "dry-run" : "apply",
@@ -617,6 +697,7 @@ export class TenderOptionUpsertService {
         runtime: this.getRuntimeSnapshot(),
       },
     });
+    this.emitTerminalEvent(completedReport);
   }
 
   private async processSingleObject(
@@ -1533,7 +1614,7 @@ export class TenderOptionUpsertService {
     parsed: boolean,
     lastProcessedKey: string
   ): Promise<void> {
-    await this.enqueueUpdate(runId, (current) => {
+    const updatedReport = await this.enqueueUpdate(runId, (current) => {
       const totals = {
         ...current.totals,
       };
@@ -1573,6 +1654,15 @@ export class TenderOptionUpsertService {
       };
     });
     this.auditStore?.recordRunItem(runId, item);
+    this.emitRunStreamEvent(runId, {
+      type: "item-recorded",
+      payload: {
+        item,
+        totals: updatedReport.totals,
+        checkpoint: updatedReport.checkpoint,
+        status: updatedReport.status,
+      },
+    });
     this.observability?.incrementCounter("upsert.items.total", 1, {
       action: item.action,
       parsed,
@@ -1594,11 +1684,11 @@ export class TenderOptionUpsertService {
   private async enqueueUpdate(
     runId: string,
     updater: (report: RunReport) => RunReport
-  ): Promise<void> {
+  ): Promise<RunReport> {
     const current = this.updateChains.get(runId) ?? Promise.resolve();
 
     const next = current.then(async () => {
-      await this.runStore.updateRun(runId, updater);
+      return this.runStore.updateRun(runId, updater);
     });
 
     this.updateChains.set(
@@ -1609,7 +1699,7 @@ export class TenderOptionUpsertService {
     );
     this.updateRuntimeGauges();
 
-    await next;
+    return next;
   }
 
   private async awaitPendingUpdates(runId: string): Promise<void> {

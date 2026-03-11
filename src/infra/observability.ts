@@ -105,6 +105,7 @@ export class ObservabilityStore {
   private readonly gauges = new Map<string, GaugeMetric>();
   private readonly timings = new Map<string, TimingMetric>();
   private readonly writeChains = new Map<string, Promise<void>>();
+  private readonly subscribers = new Set<(event: TelemetryEvent) => void>();
 
   constructor(options: ObservabilityStoreOptions = {}) {
     this.baseDirectory =
@@ -181,6 +182,9 @@ export class ObservabilityStore {
     });
 
     this.enqueueAppend(join(this.baseDirectory, "events.ndjson"), event);
+    for (const subscriber of this.subscribers) {
+      subscriber(event);
+    }
 
     if (event.runId) {
       this.enqueueAppend(
@@ -194,6 +198,13 @@ export class ObservabilityStore {
     }
 
     return event;
+  }
+
+  subscribe(subscriber: (event: TelemetryEvent) => void): () => void {
+    this.subscribers.add(subscriber);
+    return () => {
+      this.subscribers.delete(subscriber);
+    };
   }
 
   getMetricsSnapshot(): {

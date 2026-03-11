@@ -14,6 +14,7 @@ describe("parseAppEnv", () => {
       CLICKHOME_BUSINESS_UNIT_ID: "12",
       CLICKHOME_RESOURCE_CODE_ID: "34",
       UPSERT_AUDIT_DB_PATH: ".state/audit/custom.sqlite",
+      UPSERTER_WEB_ORIGIN: "https://ops.example.com",
     });
 
     expect(parsed.ENRICHED_DATA_PATH).toBe("enriched/");
@@ -22,6 +23,7 @@ describe("parseAppEnv", () => {
     expect(parsed.CLICKHOME_BUSINESS_UNIT_ID).toBe(12);
     expect(parsed.CLICKHOME_RESOURCE_CODE).toBe(34);
     expect(parsed.UPSERT_AUDIT_DB_PATH).toBe(".state/audit/custom.sqlite");
+    expect(parsed.UPSERTER_WEB_ORIGIN).toBe("https://ops.example.com");
   });
 
   it("throws a clear error when required fields are missing", () => {
