@@ -1,7 +1,17 @@
-import { Elysia } from "elysia";
+import { createApplication } from "@/api/server";
 
-const app = new Elysia().get("/", () => "Hello Elysia").listen(3000);
+const { app } = createApplication();
 
-console.log(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-);
+const portRaw = Bun.env.PORT;
+const port =
+  typeof portRaw === "string" && portRaw.trim().length > 0
+    ? Number(portRaw)
+    : 3000;
+
+if (!Number.isFinite(port) || port <= 0) {
+  throw new Error("PORT must be a positive number");
+}
+
+app.listen(port);
+
+console.log(`Upserter API listening on http://localhost:${port}`);
