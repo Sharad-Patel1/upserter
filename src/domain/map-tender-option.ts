@@ -13,6 +13,12 @@ export interface MappedTenderOption {
   createPayload: DeepPartial<TenderOptionModel>;
 }
 
+function emptyCollection<T>(): { list: T[] } {
+  return {
+    list: [],
+  };
+}
+
 function withDefaultBoolean(
   value: boolean | undefined,
   fallback: boolean,
@@ -71,6 +77,16 @@ export function mapTenderOptionModel(
     tenderOptionCategory: {
       tenderOptionCategoryId: product.categoryId,
     },
+    assemblyOptions: emptyCollection(),
+    componentOptions: emptyCollection(),
+    interfaceTenderOptionCosts: emptyCollection(),
+    placeholderLinks: emptyCollection(),
+    tenderOptionAttributeLinks: emptyCollection(),
+    tenderOptionDocs: emptyCollection(),
+    tenderOptionHouseLinks: emptyCollection(),
+    tenderOptionPrices: emptyCollection(),
+    tenderPriceReviews: emptyCollection(),
+    tenderSurcharges: emptyCollection(),
     // secondary lookup fallback in case external references are not indexed for this tenant
     customVal1: product.externalRef,
     externalReferenceGroup: {

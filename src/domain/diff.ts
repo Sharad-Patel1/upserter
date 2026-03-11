@@ -36,6 +36,28 @@ const TRACKED_PATHS: readonly string[] = [
   "visibleBySelections",
 ];
 
+const REQUIRED_MERGE_PATHS: readonly string[] = [
+  "allHouseTypes",
+  "assembly",
+  "businessUnit.businessUnitId",
+  "canEditColour",
+  "colourRequired",
+  "estimatingRequired",
+  "hiddenOption",
+  "optionAvailable",
+  "optionExpired",
+  "optionName",
+  "optionOverrideable",
+  "quantityRequired",
+  "resourceCode.resourceCodeId",
+  "selectionPlaceHolder",
+  "tenderOptionCategory.tenderOptionCategoryId",
+  "useHeroImage",
+  "visibleByMyHome",
+  "visibleBySales",
+  "visibleBySelections",
+];
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -168,6 +190,13 @@ export function buildTenderOptionDiff(
   const operations: JsonPatchOperation[] = [];
   const mergePayload: DeepPartial<TenderOptionModel> = {};
   const changedPaths: string[] = [];
+
+  for (const path of REQUIRED_MERGE_PATHS) {
+    const requiredValue = getPath(target, path);
+    if (requiredValue !== undefined) {
+      setPath(mergePayload, path, requiredValue);
+    }
+  }
 
   for (const path of TRACKED_PATHS) {
     const targetValue = getPath(target, path);
