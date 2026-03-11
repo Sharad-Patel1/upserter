@@ -54,4 +54,45 @@ describe("normalizeEnrichedProduct", () => {
 
     expect(result.error.code).toBe("missing_identity");
   });
+
+  it("matches option and category fields across case and separator variants", () => {
+    const result = normalizeEnrichedProduct(
+      {
+        external_ref: "SKU-002",
+        product_title: "Case Insensitive Product",
+        tender_option_category_id: "44",
+      },
+      {
+        s3Key: "enriched/case-insensitive.json",
+      }
+    );
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.optionName).toBe("Case Insensitive Product");
+    expect(result.value.categoryId).toBe(44);
+  });
+
+  it("falls back to the external reference when option name fields are absent", () => {
+    const result = normalizeEnrichedProduct(
+      {
+        externalRef: "SKU-003",
+        alternativeCategoryId: 51,
+      },
+      {
+        s3Key: "enriched/fallback-name.json",
+      }
+    );
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.optionName).toBe("SKU-003");
+    expect(result.value.categoryId).toBe(51);
+  });
 });

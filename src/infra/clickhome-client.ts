@@ -36,6 +36,7 @@ interface RequestOptions {
   body?: unknown;
   headers?: Record<string, string>;
   retry?: boolean;
+  quietHttpStatuses?: number[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,6 +79,31 @@ function toStringValue(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function asMutableRecord(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return { ...value };
+}
+
+function withTenderOptionCategoryIdAlias(body: unknown): unknown {
+  const record = asMutableRecord(body);
+  if (!record || record.categoryId !== undefined) {
+    return body;
+  }
+
+  const categoryId = toNumber(
+    readPath(record, "tenderOptionCategory.tenderOptionCategoryId"),
+  );
+  if (categoryId === undefined) {
+    return body;
+  }
+
+  record.categoryId = categoryId;
+  return record;
 }
 
 function extractResults(payload: unknown): Record<string, unknown>[] {
@@ -242,7 +268,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     return this.request<Record<string, unknown>>({
       method: "POST",
       path: "V2/AdminSetup/TenderOptions",
-      body: model,
+      body: withTenderOptionCategoryIdAlias(model),
     });
   }
 
@@ -267,7 +293,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     return this.request<Record<string, unknown>>({
       method: "PATCH",
       path: `V2/AdminSetup/TenderOptions/${optionId}`,
-      body: payload,
+      body: withTenderOptionCategoryIdAlias(payload),
       headers: {
         "Content-Type": "application/json",
       },
@@ -281,6 +307,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
       method: "GET",
       path: `V2/AdminSetup/TenderOptions/${optionId}/Files`,
       retry: false,
+      quietHttpStatuses: [404],
     });
 
     return normalizeExistingFiles(response);
@@ -343,6 +370,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     requestPayload: UploadFileRequest,
   ): Promise<Record<string, unknown>> {
     const formData = new FormData();
+    formData.append("Name", requestPayload.fileName);
     formData.append("Path", requestPayload.path);
 
     if (requestPayload.title) {
@@ -571,29 +599,32 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     const parsedBody = this.parseResponseBody(responseText);
 
     if (!response.ok) {
-      this.observability?.recordEvent({
-        level: "error",
-        component: "clickhome-client",
-        event: "clickhome.request.failed",
-        message: "ClickHome HTTP request failed",
-        durationMs: Date.now() - startedAt,
-        data: {
+      const shouldLogAsError = !options.quietHttpStatuses?.includes(response.status);
+      if (shouldLogAsError) {
+        this.observability?.recordEvent({
+          level: "error",
+          component: "clickhome-client",
+          event: "clickhome.request.failed",
+          message: "ClickHome HTTP request failed",
+          durationMs: Date.now() - startedAt,
+          data: {
+            method: options.method,
+            path: options.path,
+            status: response.status,
+            statusText: response.statusText,
+            responseBody: parsedBody,
+          },
+        });
+        this.logger?.error("ClickHome HTTP error response", {
           method: options.method,
+          url,
           path: options.path,
           status: response.status,
           statusText: response.statusText,
           responseBody: parsedBody,
-        },
-      });
-      this.logger?.error("ClickHome HTTP error response", {
-        method: options.method,
-        url,
-        path: options.path,
-        status: response.status,
-        statusText: response.statusText,
-        responseBody: parsedBody,
-        responseHeaders: Object.fromEntries(response.headers.entries()),
-      });
+          responseHeaders: Object.fromEntries(response.headers.entries()),
+        });
+      }
 
       throw new HttpError(
         `ClickHome request failed: ${options.method} ${options.path}`,

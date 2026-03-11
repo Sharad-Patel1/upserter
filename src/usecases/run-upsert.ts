@@ -86,6 +86,36 @@ function normalizeFileName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function toAbsoluteHttpUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function resolveAttachmentSourceUrl(
+  attachment: NormalizedAttachment,
+): string | undefined {
+  return (
+    toAbsoluteHttpUrl(attachment.url) ??
+    toAbsoluteHttpUrl(attachment.path) ??
+    toAbsoluteHttpUrl(attachment.largeUrl) ??
+    toAbsoluteHttpUrl(attachment.mediumUrl) ??
+    toAbsoluteHttpUrl(attachment.smallUrl) ??
+    toAbsoluteHttpUrl(attachment.thumbnailUrl)
+  );
+}
+
 function createAttachmentDedupeKey(attachment: {
   fileName: string;
   size?: number;
@@ -969,13 +999,12 @@ export class TenderOptionUpsertService {
     });
 
     const attachmentsWithPath = input.attachments.filter((attachment) => {
-      return Boolean(attachment.path ?? attachment.url);
+      return Boolean(resolveAttachmentSourceUrl(attachment));
     });
-    const missingPathCount = input.attachments.length - attachmentsWithPath.length;
-    if (missingPathCount > 0) {
-      summary.failed += missingPathCount;
-      this.logger.warn("Skipping attachments without URL path", {
-        missingPathCount,
+    const invalidPathCount = input.attachments.length - attachmentsWithPath.length;
+    if (invalidPathCount > 0) {
+      this.logger.warn("Skipping attachments without absolute HTTP(S) source URL", {
+        invalidPathCount,
       });
     }
 
@@ -1083,9 +1112,9 @@ export class TenderOptionUpsertService {
     optionId: number,
     attachment: NormalizedAttachment
   ): Promise<UploadFileRequest> {
-    const path = attachment.path ?? attachment.url;
+    const path = resolveAttachmentSourceUrl(attachment);
     if (!path) {
-      throw new Error("Attachment has no URL path for AddFile request");
+      throw new Error("Attachment has no absolute HTTP(S) source URL for AddFile request");
     }
 
     return {
@@ -1094,10 +1123,10 @@ export class TenderOptionUpsertService {
       title: attachment.title ?? attachment.fileName,
       keyWords: attachment.keyWords,
       path,
-      thumbnailUrl: attachment.thumbnailUrl,
-      smallUrl: attachment.smallUrl,
-      mediumUrl: attachment.mediumUrl,
-      largeUrl: attachment.largeUrl,
+      thumbnailUrl: toAbsoluteHttpUrl(attachment.thumbnailUrl),
+      smallUrl: toAbsoluteHttpUrl(attachment.smallUrl),
+      mediumUrl: toAbsoluteHttpUrl(attachment.mediumUrl),
+      largeUrl: toAbsoluteHttpUrl(attachment.largeUrl),
     };
   }
 

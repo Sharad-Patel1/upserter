@@ -8,6 +8,10 @@ import type {
 
 type UnknownRecord = Record<string, unknown>;
 
+function normalizeLookupKey(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
 function asRecord(value: unknown): UnknownRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -21,11 +25,35 @@ function readPath(input: UnknownRecord, path: string): unknown {
   let current: unknown = input;
 
   for (const segment of segments) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+        return undefined;
+      }
+
+      current = current[index];
+      continue;
+    }
+
+    if (!current || typeof current !== "object") {
       return undefined;
     }
 
-    current = (current as UnknownRecord)[segment];
+    const record = current as UnknownRecord;
+    if (segment in record) {
+      current = record[segment];
+      continue;
+    }
+
+    const normalizedSegment = normalizeLookupKey(segment);
+    const matchedKey = Object.keys(record).find(
+      (key) => normalizeLookupKey(key) === normalizedSegment,
+    );
+    if (!matchedKey) {
+      return undefined;
+    }
+
+    current = record[matchedKey];
   }
 
   return current;
@@ -397,18 +425,35 @@ export function normalizeEnrichedProduct(
   }
 
   const optionName = toStringValue(
-    pickValue(root, ["optionName", "name", "title", "productName", "displayName"])
+    pickValue(root, [
+      "optionName",
+      "name",
+      "title",
+      "productName",
+      "displayName",
+      "productTitle",
+      "shortDescription",
+      "description",
+    ])
   );
   const categoryId = toNumberValue(
     pickValue(root, [
       "categoryId",
       "tenderOptionCategoryId",
       "tenderOptionCategory.tenderOptionCategoryId",
-      "tenderOptionCategoryId",
+      "tenderOptionCategory.id",
+      "category.id",
+      "category.categoryId",
+      "category.tenderOptionCategoryId",
+      "alternativeCategoryId",
+      "mappedCategoryId",
+      "suggestedCategoryId",
     ])
   );
 
-  if (!optionName || categoryId === undefined) {
+  const normalizedOptionName = optionName ?? externalRef;
+
+  if (!normalizedOptionName || categoryId === undefined) {
     return {
       ok: false,
       error: {
@@ -449,7 +494,7 @@ export function normalizeEnrichedProduct(
     source,
     sku,
     externalRef,
-    optionName,
+    optionName: normalizedOptionName,
     categoryId,
     businessUnitId: toNumberValue(
       pickValue(root, ["businessUnitId", "businessUnit.businessUnitId"])

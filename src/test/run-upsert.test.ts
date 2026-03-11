@@ -450,6 +450,78 @@ describe("TenderOptionUpsertService", () => {
     expect(uploadedFiles[1]?.path).toBe("https://cdn.example.com/files/photo.jpg");
   });
 
+  it("prefers a valid attachment url over an invalid relative path during uploads", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const runStore = new RunStore({ baseDirectory: dir });
+
+    const source = new FakeSource({
+      "enriched/product-relative-path.json": {
+        externalRef: "SKU-REL",
+        optionName: "Relative Path Product",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "abi-logo.svg",
+            path: "abi-logo.svg",
+            url: "https://cdn.example.com/files/abi-logo.svg",
+            thumbnailUrl: "thumbs/abi-logo.svg",
+          },
+        ],
+      },
+    });
+
+    const uploadedFiles: UploadFileRequest[] = [];
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return { tenderOptionId: 42 };
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(request: UploadFileRequest): Promise<Record<string, unknown>> {
+        uploadedFiles.push(request);
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      uuid: () => "run-relative-path-files",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.totals.filesUploaded).toBe(1);
+    expect(uploadedFiles).toHaveLength(1);
+    expect(uploadedFiles[0]?.path).toBe("https://cdn.example.com/files/abi-logo.svg");
+    expect(uploadedFiles[0]?.thumbnailUrl).toBeUndefined();
+  });
+
   it("falls back to lookup when create response lacks optionId and still uploads files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
     const runStore = new RunStore({ baseDirectory: dir });
