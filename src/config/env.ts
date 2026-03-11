@@ -16,6 +16,7 @@ export interface AppEnv {
   CLICKHOME_API_KEY: string;
   CLICKHOME_BUSINESS_UNIT_ID: number;
   CLICKHOME_RESOURCE_CODE: number;
+  UPSERT_AUDIT_DB_PATH?: string;
 }
 
 const envSchema = z.object({
@@ -27,6 +28,7 @@ const envSchema = z.object({
   CLICKHOME_API_KEY: z.string().min(1, "CLICKHOME_API_KEY (or CLICKHOME_KEY) is required"),
   CLICKHOME_BUSINESS_UNIT_ID: z.coerce.number().int().nonnegative(),
   CLICKHOME_RESOURCE_CODE: z.coerce.number().int().nonnegative(),
+  UPSERT_AUDIT_DB_PATH: z.string().min(1).optional(),
 });
 
 function firstDefined(
@@ -54,6 +56,7 @@ function buildRawEnv(runtimeEnv: Record<string, string | undefined>): Record<str
     CLICKHOME_API_KEY: firstDefined(runtimeEnv, ENV_ALIASES.CLICKHOME_API_KEY),
     CLICKHOME_BUSINESS_UNIT_ID: runtimeEnv.CLICKHOME_BUSINESS_UNIT_ID,
     CLICKHOME_RESOURCE_CODE: firstDefined(runtimeEnv, ENV_ALIASES.CLICKHOME_RESOURCE_CODE),
+    UPSERT_AUDIT_DB_PATH: runtimeEnv.UPSERT_AUDIT_DB_PATH,
   };
 }
 

@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { HttpError } from "@/infra/clickhome-client";
 import { ObservabilityStore } from "@/infra/observability";
 import { RunStore } from "@/infra/run-store";
+import { SqliteAuditStore } from "@/infra/sqlite-audit-store";
 import { buildTenderOptionDiff } from "@/domain/diff";
 import { mapTenderOptionModel } from "@/domain/map-tender-option";
 import { normalizeEnrichedProduct } from "@/domain/normalize";
 import type { AppEnv } from "@/config/env";
 import type {
   AppliedRunOptions,
+  AuditContext,
   ExistingRemoteFile,
   FileSyncSummary,
   JsonPatchOperation,
@@ -30,6 +32,7 @@ interface UpsertServiceDependencies {
   runStore: RunStore;
   logger?: Logger;
   observability?: ObservabilityStore;
+  auditStore?: SqliteAuditStore;
   now?: () => Date;
   uuid?: () => string;
   externalReferenceKey?: string;
@@ -252,6 +255,7 @@ export class TenderOptionUpsertService {
   private readonly runStore: RunStore;
   private readonly logger: Logger;
   private readonly observability: ObservabilityStore | null;
+  private readonly auditStore: SqliteAuditStore | null;
   private readonly now: () => Date;
   private readonly uuid: () => string;
   private readonly externalReferenceKey: string;
@@ -265,6 +269,7 @@ export class TenderOptionUpsertService {
     this.runStore = dependencies.runStore;
     this.logger = dependencies.logger ?? defaultLogger;
     this.observability = dependencies.observability ?? null;
+    this.auditStore = dependencies.auditStore ?? null;
     this.now = dependencies.now ?? (() => new Date());
     this.uuid = dependencies.uuid ?? (() => crypto.randomUUID());
     this.externalReferenceKey = dependencies.externalReferenceKey ?? "EXTERNALREF";
@@ -363,6 +368,80 @@ export class TenderOptionUpsertService {
     );
   }
 
+  private buildAuditContext(
+    runId: string,
+    input: {
+      itemKey?: string;
+      externalRef?: string;
+      optionId?: number;
+      step?: string;
+      requestId?: string;
+    } = {},
+  ): AuditContext {
+    return {
+      runId,
+      itemKey: input.itemKey,
+      externalRef: input.externalRef,
+      optionId: input.optionId,
+      step: input.step,
+      requestId: input.requestId,
+    };
+  }
+
+  private recordArtifact(input: {
+    runId: string;
+    itemKey?: string;
+    externalRef?: string;
+    optionId?: number;
+    step: string;
+    artifactType: string;
+    payload: unknown;
+    contentType?: string;
+  }): void {
+    this.auditStore?.recordArtifact({
+      context: this.buildAuditContext(input.runId, {
+        itemKey: input.itemKey,
+        externalRef: input.externalRef,
+        optionId: input.optionId,
+        step: input.step,
+      }),
+      step: input.step,
+      artifactType: input.artifactType,
+      payload: input.payload,
+      contentType: input.contentType,
+    });
+  }
+
+  private recordFileSyncAttempt(input: {
+    runId: string;
+    itemKey: string;
+    externalRef?: string;
+    optionId?: number;
+    stage: string;
+    status: string;
+    fileName: string;
+    sourceUrl?: string;
+    request?: unknown;
+    response?: unknown;
+    error?: string;
+  }): void {
+    this.auditStore?.recordFileSyncAttempt({
+      context: this.buildAuditContext(input.runId, {
+        itemKey: input.itemKey,
+        externalRef: input.externalRef,
+        optionId: input.optionId,
+        step: input.stage,
+      }),
+      stage: input.stage,
+      status: input.status,
+      fileName: input.fileName,
+      sourceUrl: input.sourceUrl,
+      request: input.request,
+      response: input.response,
+      error: input.error,
+    });
+  }
+
   private recordRunEvent(input: {
     runId: string;
     level: "info" | "warn" | "error";
@@ -377,6 +456,17 @@ export class TenderOptionUpsertService {
       event: input.event,
       traceId: input.runId,
       runId: input.runId,
+      message: input.message,
+      durationMs: input.durationMs,
+      data: input.data,
+    });
+    this.auditStore?.recordStepEvent({
+      context: this.buildAuditContext(input.runId, {
+        step: input.event,
+      }),
+      component: "upsert-service",
+      event: input.event,
+      level: input.level,
       message: input.message,
       durationMs: input.durationMs,
       data: input.data,
@@ -403,6 +493,20 @@ export class TenderOptionUpsertService {
       itemKey: input.itemKey,
       externalRef: input.externalRef,
       optionId: input.optionId,
+      message: input.message,
+      durationMs: input.durationMs,
+      data: input.data,
+    });
+    this.auditStore?.recordStepEvent({
+      context: this.buildAuditContext(input.runId, {
+        itemKey: input.itemKey,
+        externalRef: input.externalRef,
+        optionId: input.optionId,
+        step: input.event,
+      }),
+      component: "upsert-service",
+      event: input.event,
+      level: input.level,
       message: input.message,
       durationMs: input.durationMs,
       data: input.data,
@@ -573,9 +677,27 @@ export class TenderOptionUpsertService {
       };
     }
 
+    this.recordArtifact({
+      runId,
+      itemKey: key,
+      step: "source.read",
+      artifactType: "source-payload",
+      payload: {
+        source: sourceMetadata,
+        payload,
+      },
+    });
+
     const normalized = normalizeEnrichedProduct(payload, sourceMetadata);
     if (!normalized.ok) {
       const finishedAt = this.now();
+      this.recordArtifact({
+        runId,
+        itemKey: key,
+        step: "normalize.failed",
+        artifactType: "normalization-error",
+        payload: normalized.error,
+      });
       const action =
         normalized.error.code === "missing_identity"
           ? "error_missing_identity"
@@ -609,12 +731,28 @@ export class TenderOptionUpsertService {
 
     const product = normalized.value;
     const fileSummary = createFileSyncSummary();
+    this.recordArtifact({
+      runId,
+      itemKey: key,
+      externalRef: product.externalRef,
+      step: "normalize.completed",
+      artifactType: "normalized-product",
+      payload: product,
+    });
     const mapping = mapTenderOptionModel(product, {
       businessUnitId: this.env.CLICKHOME_BUSINESS_UNIT_ID,
       resourceCodeId: this.env.CLICKHOME_RESOURCE_CODE,
       nowIso: this.now().toISOString(),
       farFutureIso: FAR_FUTURE_ISO,
       externalReferenceKey: this.externalReferenceKey,
+    });
+    this.recordArtifact({
+      runId,
+      itemKey: key,
+      externalRef: product.externalRef,
+      step: "map.completed",
+      artifactType: "mapped-create-payload",
+      payload: mapping.createPayload,
     });
     this.recordItemEvent({
       runId,
@@ -633,6 +771,18 @@ export class TenderOptionUpsertService {
       const existing = await this.client.listTenderOptionsByExternalRef({
         externalRef: product.externalRef,
         vendorModel: product.vendorModel ?? product.sku,
+      }, this.buildAuditContext(runId, {
+        itemKey: key,
+        externalRef: product.externalRef,
+        step: "lookup.existing",
+      }));
+      this.recordArtifact({
+        runId,
+        itemKey: key,
+        externalRef: product.externalRef,
+        step: "lookup.existing",
+        artifactType: "lookup-results",
+        payload: existing,
       });
       this.recordItemEvent({
         runId,
@@ -702,7 +852,22 @@ export class TenderOptionUpsertService {
             message: "Would create TenderOption",
           });
         } else {
-          const created = await this.client.createTenderOption(mapping.createPayload);
+          const created = await this.client.createTenderOption(
+            mapping.createPayload,
+            this.buildAuditContext(runId, {
+              itemKey: key,
+              externalRef: product.externalRef,
+              step: "create.request",
+            }),
+          );
+          this.recordArtifact({
+            runId,
+            itemKey: key,
+            externalRef: product.externalRef,
+            step: "create.response",
+            artifactType: "create-response",
+            payload: created,
+          });
           optionId = extractOptionId(created);
 
           if (optionId === undefined) {
@@ -714,6 +879,18 @@ export class TenderOptionUpsertService {
             const lookupResults = await this.client.listTenderOptionsByExternalRef({
               externalRef: product.externalRef,
               vendorModel: product.vendorModel ?? product.sku,
+            }, this.buildAuditContext(runId, {
+              itemKey: key,
+              externalRef: product.externalRef,
+              step: "create.lookup_fallback",
+            }));
+            this.recordArtifact({
+              runId,
+              itemKey: key,
+              externalRef: product.externalRef,
+              step: "create.lookup_fallback",
+              artifactType: "fallback-lookup-results",
+              payload: lookupResults,
             });
             if (lookupResults.length === 1 && lookupResults[0]) {
               optionId = extractOptionId(lookupResults[0]);
@@ -752,6 +929,36 @@ export class TenderOptionUpsertService {
         optionId = extractOptionId(existingOption);
 
         const diff = buildTenderOptionDiff(existingOption, mapping.createPayload);
+        this.recordArtifact({
+          runId,
+          itemKey: key,
+          externalRef: product.externalRef,
+          optionId,
+          step: "update.diff",
+          artifactType: "diff-summary",
+          payload: {
+            changedPaths: diff.changedPaths,
+            operationCount: diff.operations.length,
+          },
+        });
+        this.recordArtifact({
+          runId,
+          itemKey: key,
+          externalRef: product.externalRef,
+          optionId,
+          step: "update.diff",
+          artifactType: "diff-json-patch",
+          payload: diff.operations,
+        });
+        this.recordArtifact({
+          runId,
+          itemKey: key,
+          externalRef: product.externalRef,
+          optionId,
+          step: "update.diff",
+          artifactType: "diff-merge-payload",
+          payload: diff.mergePayload,
+        });
         this.recordItemEvent({
           runId,
           itemKey: key,
@@ -825,7 +1032,16 @@ export class TenderOptionUpsertService {
           });
 
           try {
-            await this.client.patchTenderOptionMerge(optionId ?? 0, diff.mergePayload);
+            await this.client.patchTenderOptionMerge(
+              optionId ?? 0,
+              diff.mergePayload,
+              this.buildAuditContext(runId, {
+                itemKey: key,
+                externalRef: product.externalRef,
+                optionId,
+                step: "update.patch.merge",
+              }),
+            );
           } catch (primaryError) {
             if (!canFallbackPatchStrategy(primaryError)) {
               throw primaryError;
@@ -846,7 +1062,16 @@ export class TenderOptionUpsertService {
               },
             });
             try {
-              await this.client.patchTenderOptionJsonPatch(optionId ?? 0, diff.operations);
+              await this.client.patchTenderOptionJsonPatch(
+                optionId ?? 0,
+                diff.operations,
+                this.buildAuditContext(runId, {
+                  itemKey: key,
+                  externalRef: product.externalRef,
+                  optionId,
+                  step: "update.patch.json-patch",
+                }),
+              );
             } catch (fallbackError) {
               throw new Error(
                 `Primary patch strategy failed: ${toErrorMessage(primaryError)}; fallback patch strategy failed: ${toErrorMessage(fallbackError)}`,
@@ -916,6 +1141,20 @@ export class TenderOptionUpsertService {
           fileSummary,
         },
       });
+      this.recordArtifact({
+        runId,
+        itemKey: key,
+        externalRef: product.externalRef,
+        optionId,
+        step: "item.completed",
+        artifactType: "item-outcome",
+        payload: {
+          action,
+          decision,
+          files: fileSummary,
+          audit,
+        },
+      });
 
       return {
         parsed: true,
@@ -947,6 +1186,16 @@ export class TenderOptionUpsertService {
         message: "Processing source object failed",
         durationMs: finishedAt.getTime() - startedAt.getTime(),
         data: {
+          error: toErrorMessage(error),
+        },
+      });
+      this.recordArtifact({
+        runId,
+        itemKey: key,
+        externalRef: normalized.value.externalRef,
+        step: "item.failed",
+        artifactType: "item-error",
+        payload: {
           error: toErrorMessage(error),
         },
       });
@@ -1002,6 +1251,18 @@ export class TenderOptionUpsertService {
       return Boolean(resolveAttachmentSourceUrl(attachment));
     });
     const invalidPathCount = input.attachments.length - attachmentsWithPath.length;
+    this.recordArtifact({
+      runId: input.runId,
+      itemKey: input.itemKey,
+      externalRef: input.externalRef,
+      optionId: input.optionId,
+      step: "files.attachments",
+      artifactType: "attachments-with-path",
+      payload: {
+        attachments: attachmentsWithPath,
+        invalidPathCount,
+      },
+    });
     if (invalidPathCount > 0) {
       this.logger.warn("Skipping attachments without absolute HTTP(S) source URL", {
         invalidPathCount,
@@ -1010,6 +1271,17 @@ export class TenderOptionUpsertService {
 
     if (input.optionId === undefined) {
       summary.wouldUpload = attachmentsWithPath.length;
+      for (const attachment of attachmentsWithPath) {
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          stage: "files.deferred",
+          status: "deferred_missing_option_id",
+          fileName: attachment.fileName,
+          sourceUrl: resolveAttachmentSourceUrl(attachment),
+        });
+      }
       this.recordItemEvent({
         runId: input.runId,
         itemKey: input.itemKey,
@@ -1027,12 +1299,37 @@ export class TenderOptionUpsertService {
     let existingFiles: ExistingRemoteFile[] = [];
 
     try {
-      existingFiles = await this.client.listTenderOptionFilesPreferred(input.optionId);
+      existingFiles = await this.client.listTenderOptionFilesPreferred(
+        input.optionId,
+        this.buildAuditContext(input.runId, {
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          step: "files.list.preferred",
+        }),
+      );
     } catch {
-      existingFiles = await this.client.listTenderOptionFilesFallback(input.optionId);
+      existingFiles = await this.client.listTenderOptionFilesFallback(
+        input.optionId,
+        this.buildAuditContext(input.runId, {
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          step: "files.list.fallback",
+        }),
+      );
     }
 
     summary.listedExisting = existingFiles.length;
+    this.recordArtifact({
+      runId: input.runId,
+      itemKey: input.itemKey,
+      externalRef: input.externalRef,
+      optionId: input.optionId,
+      step: "files.list",
+      artifactType: "existing-files",
+      payload: existingFiles,
+    });
 
     const existingKeys = new Set(existingFiles.map((file) => createAttachmentDedupeKey(file)));
 
@@ -1041,14 +1338,47 @@ export class TenderOptionUpsertService {
       const key = createAttachmentDedupeKey(attachment);
       if (existingKeys.has(key) || existingKeys.has(`${normalizeFileName(attachment.fileName)}||`)) {
         summary.skippedExisting += 1;
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.dedupe",
+          status: "skipped_existing",
+          fileName: attachment.fileName,
+          sourceUrl: resolveAttachmentSourceUrl(attachment),
+          request: attachment,
+        });
         continue;
       }
 
       pendingAttachments.push(attachment);
     }
+    this.recordArtifact({
+      runId: input.runId,
+      itemKey: input.itemKey,
+      externalRef: input.externalRef,
+      optionId: input.optionId,
+      step: "files.pending",
+      artifactType: "pending-attachments",
+      payload: pendingAttachments,
+    });
 
     if (input.dryRun) {
       summary.wouldUpload += pendingAttachments.length;
+      for (const attachment of pendingAttachments) {
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.dry_run",
+          status: "would_upload",
+          fileName: attachment.fileName,
+          sourceUrl: resolveAttachmentSourceUrl(attachment),
+          request: attachment,
+        });
+      }
       this.recordItemEvent({
         runId: input.runId,
         itemKey: input.itemKey,
@@ -1069,13 +1399,56 @@ export class TenderOptionUpsertService {
     await this.runWithConcurrency(pendingAttachments, input.fileConcurrency, async (attachment) => {
       try {
         const uploadRequest = await this.resolveUploadRequest(input.optionId!, attachment);
-        await this.client.uploadTenderOptionFile(uploadRequest);
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.upload",
+          status: "requesting",
+          fileName: attachment.fileName,
+          sourceUrl: uploadRequest.path,
+          request: uploadRequest,
+        });
+        const uploadResponse = await this.client.uploadTenderOptionFile(
+          uploadRequest,
+          this.buildAuditContext(input.runId, {
+            itemKey: input.itemKey,
+            externalRef: input.externalRef,
+            optionId: input.optionId,
+            step: "files.upload",
+          }),
+        );
         summary.uploaded += 1;
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.upload",
+          status: "uploaded",
+          fileName: attachment.fileName,
+          sourceUrl: uploadRequest.path,
+          request: uploadRequest,
+          response: uploadResponse,
+        });
       } catch (error) {
         summary.failed += 1;
         this.logger.warn("File upload failed", {
           optionId: input.optionId,
           fileName: attachment.fileName,
+          error: toErrorMessage(error),
+        });
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.upload",
+          status: "failed",
+          fileName: attachment.fileName,
+          sourceUrl: resolveAttachmentSourceUrl(attachment),
+          request: attachment,
           error: toErrorMessage(error),
         });
         this.recordItemEvent({
@@ -1102,7 +1475,9 @@ export class TenderOptionUpsertService {
       level: summary.failed > 0 ? "warn" : "info",
       event: "upsert.files.sync_completed",
       message: "Completed attachment synchronization",
-      data: summary,
+      data: {
+        ...summary,
+      },
     });
 
     return summary;
@@ -1197,6 +1572,7 @@ export class TenderOptionUpsertService {
         items: [...current.items, item],
       };
     });
+    this.auditStore?.recordRunItem(runId, item);
     this.observability?.incrementCounter("upsert.items.total", 1, {
       action: item.action,
       parsed,

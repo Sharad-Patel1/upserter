@@ -2,11 +2,13 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { ObservabilityStore } from "@/infra/observability";
+import { SqliteAuditStore } from "@/infra/sqlite-audit-store";
 import type { RunReport } from "@/types/upsert";
 
 export interface RunStoreOptions {
   baseDirectory?: string;
   observability?: ObservabilityStore;
+  auditStore?: SqliteAuditStore;
 }
 
 interface CheckpointCandidate {
@@ -18,16 +20,19 @@ interface CheckpointCandidate {
 export class RunStore {
   private readonly baseDirectory: string;
   private readonly observability: ObservabilityStore | null;
+  private readonly auditStore: SqliteAuditStore | null;
 
   constructor(options: RunStoreOptions = {}) {
     this.baseDirectory = options.baseDirectory ?? join(process.cwd(), ".state", "upserts");
     this.observability = options.observability ?? null;
+    this.auditStore = options.auditStore ?? null;
   }
 
   async createRun(report: RunReport): Promise<void> {
     const startedAt = Date.now();
     await this.ensureBaseDirectory();
     await this.writeRun(report);
+    this.auditStore?.recordRun(report);
     this.observability?.incrementCounter("run_store.create.total");
     this.observability?.observeDuration("run_store.create.duration_ms", Date.now() - startedAt);
     this.observability?.recordEvent({
@@ -79,6 +84,7 @@ export class RunStore {
 
     const updated = updater(existing);
     await this.writeRun(updated);
+    this.auditStore?.recordRun(updated);
     this.observability?.incrementCounter("run_store.update.total");
     this.observability?.observeDuration("run_store.update.duration_ms", Date.now() - startedAt);
     return updated;

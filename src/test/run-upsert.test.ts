@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import type { AppEnv } from "@/config/env";
 import { HttpError } from "@/infra/clickhome-client";
 import { RunStore } from "@/infra/run-store";
+import { SqliteAuditStore } from "@/infra/sqlite-audit-store";
 import type {
   ExistingRemoteFile,
   JsonPatchOperation,
@@ -606,5 +607,252 @@ describe("TenderOptionUpsertService", () => {
     expect(uploadedFiles[0]?.path).toBe("https://cdn.example.com/files/drawing.png");
     // First list call returns [] (no existing), second is the fallback lookup
     expect(listCallCount).toBe(2);
+  });
+
+  it("persists create-path artifacts and file uploads in SQLite audit storage", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const auditStore = new SqliteAuditStore({
+      databasePath: join(dir, "audit.sqlite"),
+    });
+    const runStore = new RunStore({ baseDirectory: join(dir, "runs"), auditStore });
+
+    const source = new FakeSource({
+      "enriched/product-audit.json": {
+        externalRef: "SKU-AUDIT",
+        optionName: "Audited Product",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "spec.pdf",
+            url: "https://cdn.example.com/files/spec.pdf",
+          },
+        ],
+      },
+    });
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return { tenderOptionId: 42 };
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(): Promise<Record<string, unknown>> {
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      auditStore,
+      uuid: () => "run-audit-create",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    const detail = auditStore.getRunItemDetail(
+      queued.runId,
+      "enriched/product-audit.json",
+    );
+    expect(detail.item?.action).toBe("create");
+    expect(detail.artifacts.some((entry) => entry.artifactType === "source-payload")).toBe(
+      true,
+    );
+    expect(
+      detail.artifacts.some((entry) => entry.artifactType === "mapped-create-payload"),
+    ).toBe(true);
+    expect(detail.artifacts.some((entry) => entry.artifactType === "create-response")).toBe(
+      true,
+    );
+    expect(detail.fileSyncAttempts.some((entry) => entry.status === "uploaded")).toBe(
+      true,
+    );
+  });
+
+  it("persists diff artifacts and terminal errors when both patch strategies fail", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const auditStore = new SqliteAuditStore({
+      databasePath: join(dir, "audit.sqlite"),
+    });
+    const runStore = new RunStore({ baseDirectory: join(dir, "runs"), auditStore });
+
+    const source = new FakeSource({
+      "enriched/product-patch-fail.json": {
+        externalRef: "SKU-PATCH-FAIL",
+        optionName: "New Name",
+        categoryId: 7,
+      },
+    });
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [
+          {
+            tenderOptionId: 11,
+            optionName: "Old Name",
+            visibleBySales: true,
+            businessUnit: { businessUnitId: 1 },
+            resourceCode: { resourceCodeId: 5 },
+            tenderOptionCategory: { tenderOptionCategoryId: 7 },
+          },
+        ];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        throw new HttpError("json patch failed", 500, { message: "json failed" });
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        throw new HttpError("merge patch failed", 500, { message: "merge failed" });
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(): Promise<Record<string, unknown>> {
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      auditStore,
+      uuid: () => "run-audit-patch-fail",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.items[0]?.action).toBe("error_runtime");
+    const detail = auditStore.getRunItemDetail(
+      queued.runId,
+      "enriched/product-patch-fail.json",
+    );
+    expect(detail.artifacts.some((entry) => entry.artifactType === "diff-json-patch")).toBe(
+      true,
+    );
+    expect(
+      detail.artifacts.some((entry) => entry.artifactType === "diff-merge-payload"),
+    ).toBe(true);
+    expect(detail.artifacts.some((entry) => entry.artifactType === "item-error")).toBe(
+      true,
+    );
+    expect(detail.item?.error).toContain("merge patch failed");
+    expect(detail.item?.error).toContain("json patch failed");
+  });
+
+  it("records deferred file uploads when create leaves optionId unavailable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const auditStore = new SqliteAuditStore({
+      databasePath: join(dir, "audit.sqlite"),
+    });
+    const runStore = new RunStore({ baseDirectory: join(dir, "runs"), auditStore });
+
+    const source = new FakeSource({
+      "enriched/product-deferred.json": {
+        externalRef: "SKU-DEFERRED",
+        optionName: "Deferred Upload Product",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "drawing.png",
+            url: "https://cdn.example.com/files/drawing.png",
+          },
+        ],
+      },
+    });
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(): Promise<Record<string, unknown>> {
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      auditStore,
+      uuid: () => "run-audit-deferred",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    const detail = auditStore.getRunItemDetail(
+      queued.runId,
+      "enriched/product-deferred.json",
+    );
+    expect(detail.item?.optionId).toBeUndefined();
+    expect(
+      detail.fileSyncAttempts.some(
+        (entry) => entry.status === "deferred_missing_option_id",
+      ),
+    ).toBe(true);
   });
 });

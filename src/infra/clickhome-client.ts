@@ -1,4 +1,5 @@
 import type {
+  AuditContext,
   DeepPartial,
   ExistingRemoteFile,
   JsonPatchOperation,
@@ -8,6 +9,7 @@ import type {
 } from "@/types/upsert";
 import type { TenderOptionModel } from "@/types/interfaces.codegen";
 import { ObservabilityStore } from "@/infra/observability";
+import { SqliteAuditStore } from "@/infra/sqlite-audit-store";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -28,6 +30,8 @@ export interface ClickHomeClientOptions {
   fetchImpl?: typeof fetch;
   logger?: Logger;
   observability?: ObservabilityStore;
+  auditStore?: SqliteAuditStore;
+  uuid?: () => string;
 }
 
 interface RequestOptions {
@@ -37,6 +41,7 @@ interface RequestOptions {
   headers?: Record<string, string>;
   retry?: boolean;
   quietHttpStatuses?: number[];
+  auditContext?: AuditContext;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -185,6 +190,8 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
   private readonly fetchImpl: typeof fetch;
   private readonly logger: Logger | null;
   private readonly observability: ObservabilityStore | null;
+  private readonly auditStore: SqliteAuditStore | null;
+  private readonly uuid: () => string;
 
   private sessionToken: string | null = null;
   private loginPromise: Promise<string> | null = null;
@@ -199,12 +206,14 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.logger = options.logger ?? null;
     this.observability = options.observability ?? null;
+    this.auditStore = options.auditStore ?? null;
+    this.uuid = options.uuid ?? (() => crypto.randomUUID());
   }
 
   async listTenderOptionsByExternalRef(params: {
     externalRef: string;
     vendorModel?: string;
-  }): Promise<Record<string, unknown>[]> {
+  }, auditContext?: AuditContext): Promise<Record<string, unknown>[]> {
     const criteria: Record<string, unknown> = {
       customValue1: params.externalRef,
       includeInactive: true,
@@ -235,6 +244,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
         method: "POST",
         path: "V2/AdminSetup/TenderOptions/List",
         body: requestBody,
+        auditContext,
       });
 
       const results = extractResults(response);
@@ -264,17 +274,20 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
 
   async createTenderOption(
     model: DeepPartial<TenderOptionModel>,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>({
       method: "POST",
       path: "V2/AdminSetup/TenderOptions",
       body: withTenderOptionCategoryIdAlias(model),
+      auditContext,
     });
   }
 
   async patchTenderOptionJsonPatch(
     optionId: number,
     patch: JsonPatchOperation[],
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>({
       method: "PATCH",
@@ -283,12 +296,14 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
       headers: {
         "Content-Type": "application/json-patch+json",
       },
+      auditContext,
     });
   }
 
   async patchTenderOptionMerge(
     optionId: number,
     payload: DeepPartial<TenderOptionModel>,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>({
       method: "PATCH",
@@ -297,17 +312,20 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
       headers: {
         "Content-Type": "application/json",
       },
+      auditContext,
     });
   }
 
   async listTenderOptionFilesPreferred(
     optionId: number,
+    auditContext?: AuditContext,
   ): Promise<ExistingRemoteFile[]> {
     const response = await this.request<unknown>({
       method: "GET",
       path: `V2/AdminSetup/TenderOptions/${optionId}/Files`,
       retry: false,
       quietHttpStatuses: [404],
+      auditContext,
     });
 
     return normalizeExistingFiles(response);
@@ -315,6 +333,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
 
   async listTenderOptionFilesFallback(
     optionId: number,
+    auditContext?: AuditContext,
   ): Promise<ExistingRemoteFile[]> {
     const aggregated: ExistingRemoteFile[] = [];
 
@@ -329,6 +348,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
           },
         },
         retry: false,
+        auditContext,
       });
       aggregated.push(...normalizeExistingFiles(docsResponse));
     } catch {
@@ -349,6 +369,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
           },
         },
         retry: false,
+        auditContext,
       });
       aggregated.push(...normalizeExistingFiles(filesResponse));
     } catch {
@@ -368,6 +389,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
 
   async uploadTenderOptionFile(
     requestPayload: UploadFileRequest,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>> {
     const formData = new FormData();
     formData.append("Name", requestPayload.fileName);
@@ -401,28 +423,58 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
       method: "POST",
       path: `V2/AdminSetup/TenderOptions/${requestPayload.optionId}/AddFile`,
       body: formData,
+      auditContext,
     });
   }
 
   private async login(): Promise<string> {
     const url = new URL("V2/ApiKeyLogin", this.baseUrl).toString();
+    const startedAt = Date.now();
+    const requestId = this.uuid();
+    const requestHeaders = {
+      "Content-Type": "application/json",
+    };
+    let responseHeaders: Record<string, string> | undefined;
+    let parsedBody: unknown;
 
     const response = await this.fetchImpl(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: requestHeaders,
       body: JSON.stringify({ ApiKey: this.apiKey }),
     });
 
+    const responseText = await response.text().catch(() => "");
+    parsedBody = this.parseResponseBody(responseText);
+    responseHeaders = Object.fromEntries(response.headers.entries());
+    const token = response.headers.get("ClickHomeApiToken");
+
+    this.auditStore?.recordHttpExchange({
+      context: {
+        step: "clickhome.login",
+        requestId,
+      },
+      requestId,
+      method: "POST",
+      path: "V2/ApiKeyLogin",
+      url,
+      attempt: 1,
+      status: response.status,
+      requestHeaders,
+      requestBody: { ApiKey: this.apiKey },
+      responseHeaders,
+      responseBody: parsedBody,
+      durationMs: Date.now() - startedAt,
+      error: response.ok ? undefined : "ClickHome API key login failed",
+    });
+
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
       throw new HttpError(
         "ClickHome API key login failed",
         response.status,
-        body,
+        parsedBody,
       );
     }
 
-    const token = response.headers.get("ClickHomeApiToken");
     if (!token || token.trim().length === 0) {
       throw new Error(
         "ClickHome login succeeded but no ClickHomeApiToken header in response",
@@ -462,7 +514,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     while (attempt <= this.maxRetries) {
       try {
         const token = await this.ensureAuthenticated();
-        return await this.executeRequest<T>(options, token);
+        return await this.executeRequest<T>(options, token, attempt + 1);
       } catch (error) {
         lastError = error;
 
@@ -549,6 +601,7 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
   private async executeRequest<T>(
     options: RequestOptions,
     token: string,
+    attemptNumber: number,
   ): Promise<T> {
     const startedAt = Date.now();
     const url = new URL(
@@ -557,6 +610,8 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
     ).toString();
     const headers = new Headers(options.headers);
     headers.set("ClickHomeApiToken", token);
+    const requestHeaders = Object.fromEntries(headers.entries());
+    const requestId = options.auditContext?.requestId ?? this.uuid();
 
     let body: RequestInit["body"];
     if (options.body !== undefined) {
@@ -588,52 +643,89 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
         contentType: headers.get("Content-Type"),
       },
     });
+    try {
+      const response = await this.fetchImpl(url, {
+        method: options.method,
+        headers,
+        body,
+      });
 
-    const response = await this.fetchImpl(url, {
-      method: options.method,
-      headers,
-      body,
-    });
+      const responseText = await response.text();
+      const parsedBody = this.parseResponseBody(responseText);
+      const responseHeaders = Object.fromEntries(response.headers.entries());
 
-    const responseText = await response.text();
-    const parsedBody = this.parseResponseBody(responseText);
+      if (response.headers.has("ClickHomeApiToken")) {
+        this.sessionToken = response.headers.get("ClickHomeApiToken");
+      }
 
-    if (!response.ok) {
-      const shouldLogAsError = !options.quietHttpStatuses?.includes(response.status);
-      if (shouldLogAsError) {
-        this.observability?.recordEvent({
-          level: "error",
-          component: "clickhome-client",
-          event: "clickhome.request.failed",
-          message: "ClickHome HTTP request failed",
-          durationMs: Date.now() - startedAt,
-          data: {
+      this.auditStore?.recordHttpExchange({
+        context: {
+          ...options.auditContext,
+          requestId,
+        },
+        requestId,
+        method: options.method,
+        path: options.path,
+        url,
+        attempt: attemptNumber,
+        status: response.status,
+        requestHeaders,
+        requestBody: options.body,
+        responseHeaders,
+        responseBody: parsedBody,
+        durationMs: Date.now() - startedAt,
+        error: response.ok
+          ? undefined
+          : `ClickHome request failed: ${options.method} ${options.path}`,
+      });
+
+      if (!response.ok) {
+        const shouldLogAsError = !options.quietHttpStatuses?.includes(response.status);
+        if (shouldLogAsError) {
+          this.observability?.recordEvent({
+            level: "error",
+            component: "clickhome-client",
+            event: "clickhome.request.failed",
+            message: "ClickHome HTTP request failed",
+            durationMs: Date.now() - startedAt,
+            data: {
+              method: options.method,
+              path: options.path,
+              status: response.status,
+              statusText: response.statusText,
+              responseBody: parsedBody,
+            },
+          });
+          this.logger?.error("ClickHome HTTP error response", {
             method: options.method,
+            url,
             path: options.path,
             status: response.status,
             statusText: response.statusText,
             responseBody: parsedBody,
-          },
-        });
-        this.logger?.error("ClickHome HTTP error response", {
-          method: options.method,
-          url,
-          path: options.path,
-          status: response.status,
-          statusText: response.statusText,
-          responseBody: parsedBody,
-          responseHeaders: Object.fromEntries(response.headers.entries()),
-        });
+            responseHeaders,
+          });
+        }
+
+        throw new HttpError(
+          `ClickHome request failed: ${options.method} ${options.path}`,
+          response.status,
+          parsedBody,
+        );
       }
 
-      throw new HttpError(
-        `ClickHome request failed: ${options.method} ${options.path}`,
-        response.status,
-        parsedBody,
-      );
-    }
-
-    if (parsedBody === undefined) {
+      this.observability?.recordEvent({
+        level: "info",
+        component: "clickhome-client",
+        event: "clickhome.request.completed",
+        message: "ClickHome HTTP request completed",
+        durationMs: Date.now() - startedAt,
+        data: {
+          method: options.method,
+          path: options.path,
+          status: response.status,
+        },
+      });
       this.observability?.incrementCounter("clickhome.request.total", 1, {
         method: options.method,
         path: options.path,
@@ -648,41 +740,33 @@ export class ClickHomeClient implements TenderOptionUpsertClient {
           outcome: "success",
         },
       );
-      return {} as T;
-    }
 
-    this.observability?.recordEvent({
-      level: "info",
-      component: "clickhome-client",
-      event: "clickhome.request.completed",
-      message: "ClickHome HTTP request completed",
-      durationMs: Date.now() - startedAt,
-      data: {
-        method: options.method,
-        path: options.path,
-        status: response.status,
-      },
-    });
-    this.observability?.incrementCounter("clickhome.request.total", 1, {
-      method: options.method,
-      path: options.path,
-      outcome: "success",
-    });
-    this.observability?.observeDuration(
-      "clickhome.request.duration_ms",
-      Date.now() - startedAt,
-      {
-        method: options.method,
-        path: options.path,
-        outcome: "success",
-      },
-    );
+      if (parsedBody === undefined) {
+        return {} as T;
+      }
 
-    if (isRecord(parsedBody)) {
       return parsedBody as T;
-    }
+    } catch (error) {
+      if (!(error instanceof HttpError)) {
+        this.auditStore?.recordHttpExchange({
+          context: {
+            ...options.auditContext,
+            requestId,
+          },
+          requestId,
+          method: options.method,
+          path: options.path,
+          url,
+          attempt: attemptNumber,
+          requestHeaders,
+          requestBody: options.body,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
-    return parsedBody as T;
+      throw error;
+    }
   }
 
   private parseResponseBody(body: string): unknown {

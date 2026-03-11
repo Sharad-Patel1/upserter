@@ -246,30 +246,48 @@ export interface UploadFileRequest {
   largeUrl?: string;
 }
 
+export interface AuditContext {
+  runId?: string;
+  itemKey?: string;
+  externalRef?: string;
+  optionId?: number;
+  step?: string;
+  requestId?: string;
+}
+
 export interface TenderOptionUpsertClient {
-  listTenderOptionsByExternalRef(params: {
-    externalRef: string;
-    vendorModel?: string;
-  }): Promise<Record<string, unknown>[]>;
+  listTenderOptionsByExternalRef(
+    params: {
+      externalRef: string;
+      vendorModel?: string;
+    },
+    auditContext?: AuditContext,
+  ): Promise<Record<string, unknown>[]>;
   createTenderOption(
     model: DeepPartial<TenderOptionModel>,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>>;
   patchTenderOptionJsonPatch(
     optionId: number,
     patch: JsonPatchOperation[],
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>>;
   patchTenderOptionMerge(
     optionId: number,
     payload: DeepPartial<TenderOptionModel>,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>>;
   listTenderOptionFilesPreferred(
     optionId: number,
+    auditContext?: AuditContext,
   ): Promise<ExistingRemoteFile[]>;
   listTenderOptionFilesFallback(
     optionId: number,
+    auditContext?: AuditContext,
   ): Promise<ExistingRemoteFile[]>;
   uploadTenderOptionFile(
     request: UploadFileRequest,
+    auditContext?: AuditContext,
   ): Promise<Record<string, unknown>>;
 }
 
