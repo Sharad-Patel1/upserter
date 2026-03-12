@@ -29,6 +29,8 @@ const env: AppEnv = {
   CLICKHOME_API_KEY: "token",
   CLICKHOME_BUSINESS_UNIT_ID: 1,
   CLICKHOME_RESOURCE_CODE: 5,
+  BETTER_AUTH_SECRET: "12345678901234567890123456789012",
+  BETTER_AUTH_URL: "http://localhost:3001",
 };
 
 async function waitForRun(

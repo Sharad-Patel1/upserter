@@ -16,7 +16,10 @@ export interface AppEnv {
   CLICKHOME_API_KEY: string;
   CLICKHOME_BUSINESS_UNIT_ID: number;
   CLICKHOME_RESOURCE_CODE: number;
+  BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_URL: string;
   UPSERT_AUDIT_DB_PATH?: string;
+  UPSERT_AUTH_DB_PATH?: string;
   UPSERTER_WEB_ORIGIN?: string;
 }
 
@@ -29,7 +32,10 @@ const envSchema = z.object({
   CLICKHOME_API_KEY: z.string().min(1, "CLICKHOME_API_KEY (or CLICKHOME_KEY) is required"),
   CLICKHOME_BUSINESS_UNIT_ID: z.coerce.number().int().nonnegative(),
   CLICKHOME_RESOURCE_CODE: z.coerce.number().int().nonnegative(),
+  BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET must be at least 32 characters"),
+  BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL must be a valid URL"),
   UPSERT_AUDIT_DB_PATH: z.string().min(1).optional(),
+  UPSERT_AUTH_DB_PATH: z.string().min(1).optional(),
   UPSERTER_WEB_ORIGIN: z.string().url().optional(),
 });
 
@@ -58,7 +64,10 @@ function buildRawEnv(runtimeEnv: Record<string, string | undefined>): Record<str
     CLICKHOME_API_KEY: firstDefined(runtimeEnv, ENV_ALIASES.CLICKHOME_API_KEY),
     CLICKHOME_BUSINESS_UNIT_ID: runtimeEnv.CLICKHOME_BUSINESS_UNIT_ID,
     CLICKHOME_RESOURCE_CODE: firstDefined(runtimeEnv, ENV_ALIASES.CLICKHOME_RESOURCE_CODE),
+    BETTER_AUTH_SECRET: runtimeEnv.BETTER_AUTH_SECRET,
+    BETTER_AUTH_URL: runtimeEnv.BETTER_AUTH_URL,
     UPSERT_AUDIT_DB_PATH: runtimeEnv.UPSERT_AUDIT_DB_PATH,
+    UPSERT_AUTH_DB_PATH: runtimeEnv.UPSERT_AUTH_DB_PATH,
     UPSERTER_WEB_ORIGIN: runtimeEnv.UPSERTER_WEB_ORIGIN,
   };
 }

@@ -5,6 +5,7 @@ import { createObservabilityRoutes } from "@/api/routes/observability.routes";
 import { getEnv } from "@/config/env";
 import { createHealthRoutes } from "@/api/routes/health.routes";
 import { createUpsertRoutes } from "@/api/routes/upsert.routes";
+import { createAuth } from "@/infra/auth/auth";
 import { ClickHomeClient } from "@/infra/clickhome-client";
 import { ObservabilityStore } from "@/infra/observability";
 import { createChildLogger, logger } from "@/infra/logger";
@@ -29,6 +30,7 @@ export function createApplication(dependencies: ApplicationDependencies = {}) {
   const env = dependencies.env ?? getEnv();
   const appLogger = dependencies.logger ?? logger;
   const clickhomeLogger = createChildLogger("clickhome-client");
+  const authState = createAuth({ env });
   const observability =
     dependencies.observability ?? new ObservabilityStore();
   const auditStore =
@@ -74,6 +76,7 @@ export function createApplication(dependencies: ApplicationDependencies = {}) {
   });
 
   const app = new Elysia()
+    .mount(authState.auth.handler)
     .use(
       createHealthRoutes({
         version: appPackage.version,
@@ -85,20 +88,22 @@ export function createApplication(dependencies: ApplicationDependencies = {}) {
         ),
       })
     )
-    .use(createUpsertRoutes(upsertService))
+    .use(createUpsertRoutes(upsertService, authState.auth))
     .use(
       createObservabilityRoutes(
         observability,
         auditStore,
         upsertService,
-        env.UPSERTER_WEB_ORIGIN,
+        authState.auth,
       ),
     );
 
   return {
     app,
+    auth: authState.auth,
     upsertService,
     observability,
     auditStore,
+    authDatabasePath: authState.authDatabasePath,
   };
 }

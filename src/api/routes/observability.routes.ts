@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 
+import { createAuth } from "@/infra/auth/auth";
 import { ObservabilityStore } from "@/infra/observability";
 import { SqliteAuditStore } from "@/infra/sqlite-audit-store";
 import type { RunSnapshot, RunStreamEvent } from "@/types/api";
@@ -29,23 +30,61 @@ function formatSseEvent(event: RunStreamEvent): string {
   return `event: ${event.type}\ndata: ${JSON.stringify(event.payload)}\n\n`;
 }
 
+async function ensureAuthenticated(
+  auth: ReturnType<typeof createAuth>["auth"],
+  request: Request,
+  set: { status?: number | string },
+) {
+  const session = await auth.api.getSession({
+    headers: request.headers,
+  });
+
+  if (!session) {
+    set.status = 401;
+    return {
+      message: "Unauthorized",
+    };
+  }
+
+  return session;
+}
+
 export function createObservabilityRoutes(
   observability: ObservabilityStore,
   auditStore: SqliteAuditStore,
   service: TenderOptionUpsertService,
-  webOrigin?: string,
+  auth: ReturnType<typeof createAuth>["auth"],
 ) {
   return new Elysia({ prefix: "/observability" })
-    .get("/", () =>
-      observability.getSnapshot({
+    .get("/", async ({ request, set }) => {
+      const session = await ensureAuthenticated(auth, request, set);
+      if (!session || "message" in session) {
+        return session;
+      }
+
+      return observability.getSnapshot({
         upsertRuntime: service.getRuntimeSnapshot(),
         auditDatabasePath: auditStore.databasePath,
-      }),
-    )
-    .get("/metrics", () => observability.getMetricsSnapshot())
+      });
+    })
+    .get("/metrics", async ({ request, set }) => {
+      const session = await ensureAuthenticated(auth, request, set);
+      if (!session || "message" in session) {
+        return session;
+      }
+
+      return observability.getMetricsSnapshot();
+    })
     .get(
       "/events",
-      ({ query }) => observability.getRecentEvents(query.limit ?? 200),
+      async ({ query, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
+        return observability.getRecentEvents(query.limit ?? 200);
+      },
       {
         query: t.Object({
           limit: t.Optional(t.Numeric({ minimum: 1, maximum: 5000 })),
@@ -54,7 +93,12 @@ export function createObservabilityRoutes(
     )
     .get(
       "/runs/:runId",
-      async ({ params, set }) => {
+      async ({ params, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
         const snapshot = await buildRunSnapshot(
           params.runId,
           observability,
@@ -79,6 +123,11 @@ export function createObservabilityRoutes(
     .get(
       "/runs/:runId/stream",
       async ({ params, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
         const snapshot = await buildRunSnapshot(
           params.runId,
           observability,
@@ -99,11 +148,6 @@ export function createObservabilityRoutes(
           "Content-Type": "text/event-stream; charset=utf-8",
           "X-Accel-Buffering": "no",
         });
-
-        if (webOrigin) {
-          headers.set("Access-Control-Allow-Origin", webOrigin);
-          headers.set("Vary", "Origin");
-        }
 
         let cleanup = () => {};
 
@@ -201,8 +245,14 @@ export function createObservabilityRoutes(
     )
     .get(
       "/runs/:runId/events",
-      async ({ params, query }) =>
-        observability.getRunEvents(params.runId, query.limit ?? 1000),
+      async ({ params, query, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
+        return observability.getRunEvents(params.runId, query.limit ?? 1000);
+      },
       {
         params: t.Object({
           runId: t.String(),
@@ -214,7 +264,14 @@ export function createObservabilityRoutes(
     )
     .get(
       "/runs/:runId/items/:itemKey",
-      ({ params }) => auditStore.getRunItemDetail(params.runId, params.itemKey),
+      async ({ params, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
+        return auditStore.getRunItemDetail(params.runId, params.itemKey);
+      },
       {
         params: t.Object({
           runId: t.String(),

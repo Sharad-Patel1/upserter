@@ -27,7 +27,48 @@ const env: AppEnv = {
   CLICKHOME_API_KEY: "token",
   CLICKHOME_BUSINESS_UNIT_ID: 1,
   CLICKHOME_RESOURCE_CODE: 5,
+  BETTER_AUTH_SECRET: "12345678901234567890123456789012",
+  BETTER_AUTH_URL: "http://localhost:3001",
 };
+
+async function createAuthenticatedCookie(auth: Awaited<ReturnType<typeof createApplication>>["auth"]) {
+  const email = "operator@example.com";
+  const userPassword = "password1234";
+
+  await auth.api.createUser({
+    body: {
+      email,
+      name: "Operator",
+      password: userPassword,
+      role: "admin",
+    },
+  });
+
+  const response = await auth.handler(
+    new Request("http://localhost/api/auth/sign-in/email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        password: userPassword,
+      }),
+    }),
+  );
+
+  const setCookie = response.headers.get("set-cookie");
+  if (!setCookie) {
+    throw new Error("Expected Better Auth to issue a session cookie");
+  }
+
+  const sessionCookie = setCookie.split(";")[0];
+  if (!sessionCookie) {
+    throw new Error("Expected Better Auth to issue a usable session cookie");
+  }
+
+  return sessionCookie;
+}
 
 async function waitForRun(
   store: RunStore,
@@ -111,6 +152,10 @@ class FakeClient implements TenderOptionUpsertClient {
 describe("observability routes", () => {
   it("mounts SQLite-backed run and item detail endpoints", async () => {
     const dir = await mkdtemp(join(tmpdir(), "upserter-observability-routes-"));
+    const testEnv: AppEnv = {
+      ...env,
+      UPSERT_AUTH_DB_PATH: join(dir, "auth.sqlite"),
+    };
     const observability = new ObservabilityStore({
       baseDirectory: join(dir, "observability"),
     });
@@ -123,20 +168,22 @@ describe("observability routes", () => {
       auditStore,
     });
 
-    const { app } = createApplication({
-      env,
+    const { app, auth } = createApplication({
+      env: testEnv,
       source: new FakeSource(),
       client: new FakeClient(),
       runStore,
       observability,
       auditStore,
     });
+    const cookie = await createAuthenticatedCookie(auth);
 
     const runResponse = await app.handle(
       new Request("http://localhost/upserts/tender-options/run", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Cookie: cookie,
         },
         body: JSON.stringify({
           dryRun: false,
@@ -156,7 +203,11 @@ describe("observability routes", () => {
     expect(run.status).toBe("completed");
 
     const detailResponse = await app.handle(
-      new Request(`http://localhost/observability/runs/${queued.runId}`),
+      new Request(`http://localhost/observability/runs/${queued.runId}`, {
+        headers: {
+          Cookie: cookie,
+        },
+      }),
     );
     expect(detailResponse.status).toBe(200);
     const detailJson = (await detailResponse.json()) as {
@@ -171,6 +222,11 @@ describe("observability routes", () => {
     const itemResponse = await app.handle(
       new Request(
         `http://localhost/observability/runs/${queued.runId}/items/enriched%2Fproduct.json`,
+        {
+          headers: {
+            Cookie: cookie,
+          },
+        },
       ),
     );
     expect(itemResponse.status).toBe(200);
@@ -189,6 +245,10 @@ describe("observability routes", () => {
 
   it("lists recent runs and streams snapshot, item, and terminal events", async () => {
     const dir = await mkdtemp(join(tmpdir(), "upserter-observability-stream-"));
+    const testEnv: AppEnv = {
+      ...env,
+      UPSERT_AUTH_DB_PATH: join(dir, "auth.sqlite"),
+    };
     const observability = new ObservabilityStore({
       baseDirectory: join(dir, "observability"),
     });
@@ -201,20 +261,22 @@ describe("observability routes", () => {
       auditStore,
     });
 
-    const { app } = createApplication({
-      env,
+    const { app, auth } = createApplication({
+      env: testEnv,
       source: new SlowSource(),
       client: new FakeClient(),
       runStore,
       observability,
       auditStore,
     });
+    const cookie = await createAuthenticatedCookie(auth);
 
     const runResponse = await app.handle(
       new Request("http://localhost/upserts/tender-options/run", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Cookie: cookie,
         },
         body: JSON.stringify({
           dryRun: false,
@@ -230,7 +292,11 @@ describe("observability routes", () => {
     };
 
     const runsResponse = await app.handle(
-      new Request("http://localhost/upserts/tender-options/runs?limit=1"),
+      new Request("http://localhost/upserts/tender-options/runs?limit=1", {
+        headers: {
+          Cookie: cookie,
+        },
+      }),
     );
     expect(runsResponse.status).toBe(200);
     const runsJson = (await runsResponse.json()) as Array<{
@@ -244,7 +310,11 @@ describe("observability routes", () => {
     expect(runsJson[0]?.runId).toBe(queued.runId);
 
     const streamResponse = await app.handle(
-      new Request(`http://localhost/observability/runs/${queued.runId}/stream`),
+      new Request(`http://localhost/observability/runs/${queued.runId}/stream`, {
+        headers: {
+          Cookie: cookie,
+        },
+      }),
     );
     expect(streamResponse.status).toBe(200);
     const streamText = await streamResponse.text();
@@ -255,5 +325,42 @@ describe("observability routes", () => {
 
     const run = await waitForRun(runStore, queued.runId);
     expect(run.status).toBe("completed");
+  });
+
+  it("rejects unauthenticated access to protected run endpoints", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-observability-unauth-"));
+    const testEnv: AppEnv = {
+      ...env,
+      UPSERT_AUTH_DB_PATH: join(dir, "auth.sqlite"),
+    };
+    const observability = new ObservabilityStore({
+      baseDirectory: join(dir, "observability"),
+    });
+    const auditStore = new SqliteAuditStore({
+      databasePath: join(dir, "audit.sqlite"),
+    });
+    const runStore = new RunStore({
+      baseDirectory: join(dir, "runs"),
+      observability,
+      auditStore,
+    });
+
+    const { app } = createApplication({
+      env: testEnv,
+      source: new FakeSource(),
+      client: new FakeClient(),
+      runStore,
+      observability,
+      auditStore,
+    });
+
+    const response = await app.handle(
+      new Request("http://localhost/upserts/tender-options/runs?limit=1"),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      message: "Unauthorized",
+    });
   });
 });

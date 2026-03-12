@@ -1,12 +1,40 @@
 import { Elysia, t } from "elysia";
 
+import { createAuth } from "@/infra/auth/auth";
 import { TenderOptionUpsertService } from "@/usecases/run-upsert";
 
-export function createUpsertRoutes(service: TenderOptionUpsertService) {
+async function ensureAuthenticated(
+  auth: ReturnType<typeof createAuth>["auth"],
+  request: Request,
+  set: { status?: number | string },
+) {
+  const session = await auth.api.getSession({
+    headers: request.headers,
+  });
+
+  if (!session) {
+    set.status = 401;
+    return {
+      message: "Unauthorized",
+    };
+  }
+
+  return session;
+}
+
+export function createUpsertRoutes(
+  service: TenderOptionUpsertService,
+  auth: ReturnType<typeof createAuth>["auth"],
+) {
   return new Elysia({ prefix: "/upserts/tender-options" })
     .post(
       "/run",
-      async ({ body, set }) => {
+      async ({ body, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
         const result = await service.queueRun(body ?? {});
         set.status = 202;
 
@@ -32,7 +60,14 @@ export function createUpsertRoutes(service: TenderOptionUpsertService) {
     )
     .get(
       "/runs",
-      ({ query }) => service.listRecentRuns(query.limit ?? 25),
+      async ({ query, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
+        return service.listRecentRuns(query.limit ?? 25);
+      },
       {
         query: t.Object({
           limit: t.Optional(t.Numeric({ minimum: 1, maximum: 200 })),
@@ -41,7 +76,12 @@ export function createUpsertRoutes(service: TenderOptionUpsertService) {
     )
     .get(
       "/runs/:runId",
-      async ({ params, set }) => {
+      async ({ params, request, set }) => {
+        const session = await ensureAuthenticated(auth, request, set);
+        if (!session || "message" in session) {
+          return session;
+        }
+
         const report = await service.getRun(params.runId);
         if (!report) {
           set.status = 404;
