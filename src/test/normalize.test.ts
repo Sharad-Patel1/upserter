@@ -95,4 +95,57 @@ describe("normalizeEnrichedProduct", () => {
     expect(result.value.optionName).toBe("SKU-003");
     expect(result.value.categoryId).toBe(51);
   });
+
+  it("normalizes wrapped product payloads", () => {
+    const result = normalizeEnrichedProduct(
+      {
+        data: {
+          product: {
+            sku: "SKU-004",
+            name: "Wrapped Product",
+            categoryId: 61,
+            images: ["https://cdn.example.com/images/wrapped-product.png"],
+          },
+        },
+      },
+      {
+        s3Key: "enriched/wrapped-product.json",
+      }
+    );
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.externalRef).toBe("SKU-004");
+    expect(result.value.optionName).toBe("Wrapped Product");
+    expect(result.value.categoryId).toBe(61);
+    expect(result.value.attachments).toHaveLength(1);
+    expect(result.value.attachments[0]?.fileName).toBe("wrapped-product.png");
+  });
+
+  it("falls back to top-level metadata when the wrapped product omits a required field", () => {
+    const result = normalizeEnrichedProduct(
+      {
+        externalRef: "SKU-005",
+        categoryId: 71,
+        product: {
+          name: "Mixed Root Product",
+        },
+      },
+      {
+        s3Key: "enriched/mixed-root-product.json",
+      }
+    );
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.externalRef).toBe("SKU-005");
+    expect(result.value.optionName).toBe("Mixed Root Product");
+    expect(result.value.categoryId).toBe(71);
+  });
 });

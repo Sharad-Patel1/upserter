@@ -17,7 +17,11 @@ export function createAuth(dependencies: AuthDependencies) {
     appName: "Upserter",
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: [env.BETTER_AUTH_URL, "http://localhost:3001"],
+    trustedOrigins: [
+      env.BETTER_AUTH_URL,
+      "https://upserter-web-production.up.railway.app",
+      "http://localhost:3001",
+    ],
     database: drizzleAdapter(authDatabase.db, {
       provider: "sqlite",
     }),

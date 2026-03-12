@@ -8,6 +8,53 @@ import type {
 
 type UnknownRecord = Record<string, unknown>;
 
+const IDENTITY_PATHS = [
+  "externalRef",
+  "externalReference",
+  "external_reference",
+  "productId",
+  "productID",
+  "sku",
+  "code",
+  "id",
+] as const;
+
+const OPTION_NAME_PATHS = [
+  "optionName",
+  "name",
+  "title",
+  "productName",
+  "displayName",
+  "productTitle",
+  "shortDescription",
+  "description",
+] as const;
+
+const CATEGORY_PATHS = [
+  "categoryId",
+  "tenderOptionCategoryId",
+  "tenderOptionCategory.tenderOptionCategoryId",
+  "tenderOptionCategory.id",
+  "category.id",
+  "category.categoryId",
+  "category.tenderOptionCategoryId",
+  "alternativeCategoryId",
+  "mappedCategoryId",
+  "suggestedCategoryId",
+] as const;
+
+const PRODUCT_WRAPPER_KEYS = [
+  "product",
+  "normalizedProduct",
+  "enrichedProduct",
+  "payload",
+  "data",
+  "result",
+  "item",
+  "response",
+  "body",
+] as const;
+
 function normalizeLookupKey(value: string): string {
   return value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 }
@@ -62,6 +109,100 @@ function readPath(input: UnknownRecord, path: string): unknown {
 function pickValue(input: UnknownRecord, paths: readonly string[]): unknown {
   for (const path of paths) {
     const value = readPath(input, path);
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function getProductSignal(record: UnknownRecord): {
+  hasIdentity: boolean;
+  hasOptionName: boolean;
+  hasCategory: boolean;
+} {
+  return {
+    hasIdentity: pickValue(record, IDENTITY_PATHS) !== undefined,
+    hasOptionName: pickValue(record, OPTION_NAME_PATHS) !== undefined,
+    hasCategory: pickValue(record, CATEGORY_PATHS) !== undefined,
+  };
+}
+
+function hasAnyProductSignal(record: UnknownRecord): boolean {
+  const signal = getProductSignal(record);
+  return signal.hasIdentity || signal.hasOptionName || signal.hasCategory;
+}
+
+function compareProductSignals(
+  left: ReturnType<typeof getProductSignal>,
+  right: ReturnType<typeof getProductSignal>,
+): number {
+  if (left.hasOptionName !== right.hasOptionName) {
+    return left.hasOptionName ? 1 : -1;
+  }
+
+  if (left.hasCategory !== right.hasCategory) {
+    return left.hasCategory ? 1 : -1;
+  }
+
+  if (left.hasIdentity !== right.hasIdentity) {
+    return left.hasIdentity ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function collectLookupRoots(root: UnknownRecord): UnknownRecord[] {
+  const queue: UnknownRecord[] = [root];
+  const visited = new Set<UnknownRecord>(queue);
+  const productRoots: Array<{
+    record: UnknownRecord;
+    signal: ReturnType<typeof getProductSignal>;
+    priority: number;
+  }> = [];
+  let nextPriority = 0;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    for (const key of PRODUCT_WRAPPER_KEYS) {
+      const nested = asRecord(current[key]);
+      if (!nested || visited.has(nested)) {
+        continue;
+      }
+
+      if (hasAnyProductSignal(nested)) {
+        productRoots.push({
+          record: nested,
+          signal: getProductSignal(nested),
+          priority: nextPriority++,
+        });
+      }
+
+      visited.add(nested);
+      queue.push(nested);
+    }
+  }
+
+  productRoots.sort((left, right) => {
+    const signalOrder = compareProductSignals(right.signal, left.signal);
+    if (signalOrder !== 0) {
+      return signalOrder;
+    }
+
+    return left.priority - right.priority;
+  });
+
+  return [...productRoots.map((entry) => entry.record), root];
+}
+
+function pickValueFromRoots(roots: readonly UnknownRecord[], paths: readonly string[]): unknown {
+  for (const root of roots) {
+    const value = pickValue(root, paths);
     if (value !== undefined && value !== null) {
       return value;
     }
@@ -336,37 +477,39 @@ function normalizeAttachment(entry: unknown, sourceTag?: string): NormalizedAtta
   };
 }
 
-function extractAttachments(input: UnknownRecord): NormalizedAttachment[] {
-  const candidateCollections: Array<{ value: unknown; tag?: string }> = [
-    { value: pickValue(input, ["attachments"]) },
-    { value: pickValue(input, ["files"]) },
-    { value: pickValue(input, ["documents", "docs"]), tag: "document" },
-    { value: pickValue(input, ["images", "imageUrls", "image_urls"]), tag: "image" },
-    { value: pickValue(input, ["media"]), tag: "media" },
-  ];
-
+function extractAttachments(inputs: UnknownRecord[]): NormalizedAttachment[] {
   const attachments: NormalizedAttachment[] = [];
 
-  for (const candidate of candidateCollections) {
-    const value = candidate.value;
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        const attachment = normalizeAttachment(entry, candidate.tag);
-        if (attachment) {
-          attachments.push(attachment);
-        }
-      }
-      continue;
-    }
+  for (const input of inputs) {
+    const candidateCollections: Array<{ value: unknown; tag?: string }> = [
+      { value: pickValue(input, ["attachments"]) },
+      { value: pickValue(input, ["files"]) },
+      { value: pickValue(input, ["documents", "docs"]), tag: "document" },
+      { value: pickValue(input, ["images", "imageUrls", "image_urls"]), tag: "image" },
+      { value: pickValue(input, ["media"]), tag: "media" },
+    ];
 
-    const record = asRecord(value);
-    if (record) {
-      const list = readPath(record, "list");
-      if (Array.isArray(list)) {
-        for (const entry of list) {
+    for (const candidate of candidateCollections) {
+      const value = candidate.value;
+      if (Array.isArray(value)) {
+        for (const entry of value) {
           const attachment = normalizeAttachment(entry, candidate.tag);
           if (attachment) {
             attachments.push(attachment);
+          }
+        }
+        continue;
+      }
+
+      const record = asRecord(value);
+      if (record) {
+        const list = readPath(record, "list");
+        if (Array.isArray(list)) {
+          for (const entry of list) {
+            const attachment = normalizeAttachment(entry, candidate.tag);
+            if (attachment) {
+              attachments.push(attachment);
+            }
           }
         }
       }
@@ -401,17 +544,11 @@ export function normalizeEnrichedProduct(
     };
   }
 
+  const lookupRoots = collectLookupRoots(root);
+  const lookup = (paths: readonly string[]) => pickValueFromRoots(lookupRoots, paths);
+
   const externalRef = toStringValue(
-    pickValue(root, [
-      "externalRef",
-      "externalReference",
-      "external_reference",
-      "productId",
-      "productID",
-      "sku",
-      "code",
-      "id",
-    ])
+    lookup(IDENTITY_PATHS)
   );
 
   if (!externalRef) {
@@ -425,30 +562,10 @@ export function normalizeEnrichedProduct(
   }
 
   const optionName = toStringValue(
-    pickValue(root, [
-      "optionName",
-      "name",
-      "title",
-      "productName",
-      "displayName",
-      "productTitle",
-      "shortDescription",
-      "description",
-    ])
+    lookup(OPTION_NAME_PATHS)
   );
   const categoryId = toNumberValue(
-    pickValue(root, [
-      "categoryId",
-      "tenderOptionCategoryId",
-      "tenderOptionCategory.tenderOptionCategoryId",
-      "tenderOptionCategory.id",
-      "category.id",
-      "category.categoryId",
-      "category.tenderOptionCategoryId",
-      "alternativeCategoryId",
-      "mappedCategoryId",
-      "suggestedCategoryId",
-    ])
+    lookup(CATEGORY_PATHS)
   );
 
   const normalizedOptionName = optionName ?? externalRef;
@@ -463,24 +580,24 @@ export function normalizeEnrichedProduct(
     };
   }
 
-  const attributes = normalizeAttributes(pickValue(root, ["attributes", "attributeList"]));
+  const attributes = normalizeAttributes(lookup(["attributes", "attributeList"]));
   const specificationSummaryText = toStringValue(
-    pickValue(root, ["specificationSummaryText", "specSummary", "summaryText"])
+    lookup(["specificationSummaryText", "specSummary", "summaryText"])
   );
-  const specifications = toStringArray(pickValue(root, ["specifications", "specs"]));
-  const family = toStringValue(pickValue(root, ["family", "collection"]));
+  const specifications = toStringArray(lookup(["specifications", "specs"]));
+  const family = toStringValue(lookup(["family", "collection"]));
   const colourAttribute = findAttributeValue(attributes, ["colour", "color"]);
   const finishAttribute = findAttributeValue(attributes, ["finish"]);
   const shortDescription = toStringValue(
-    pickValue(root, ["shortDescription", "short_description", "summary"])
+    lookup(["shortDescription", "short_description", "summary"])
   );
   const sku =
-    toStringValue(pickValue(root, ["sku", "vendorModel", "vendor_model", "code"])) ??
+    toStringValue(lookup(["sku", "vendorModel", "vendor_model", "code"])) ??
     externalRef;
   const vendorModel =
-    toStringValue(pickValue(root, ["vendorModel", "vendor_model"])) ?? sku;
+    toStringValue(lookup(["vendorModel", "vendor_model"])) ?? sku;
   const relatedProducts = toStringArray(
-    pickValue(root, ["relatedProducts", "related", "related_products"])
+    lookup(["relatedProducts", "related", "related_products"])
   );
 
   const productSpecs = buildProductSpecs({
@@ -497,65 +614,65 @@ export function normalizeEnrichedProduct(
     optionName: normalizedOptionName,
     categoryId,
     businessUnitId: toNumberValue(
-      pickValue(root, ["businessUnitId", "businessUnit.businessUnitId"])
+      lookup(["businessUnitId", "businessUnit.businessUnitId"])
     ),
     resourceCodeId: toNumberValue(
-      pickValue(root, ["resourceCodeId", "resourceCode.resourceCodeId"])
+      lookup(["resourceCodeId", "resourceCode.resourceCodeId"])
     ),
-    supplierId: toNumberValue(pickValue(root, ["supplierId", "supplier.id"])),
-    supplierName: toStringValue(pickValue(root, ["supplierName", "supplier.name"])),
+    supplierId: toNumberValue(lookup(["supplierId", "supplier.id"])),
+    supplierName: toStringValue(lookup(["supplierName", "supplier.name"])),
     supplierConfidence: toStringValue(
-      pickValue(root, ["supplierConfidence", "supplier.confidence"])
+      lookup(["supplierConfidence", "supplier.confidence"])
     ),
-    addendum: toStringValue(pickValue(root, ["addendum"])),
-    brand: toStringValue(pickValue(root, ["brand"])),
+    addendum: toStringValue(lookup(["addendum"])),
+    brand: toStringValue(lookup(["brand"])),
     shortDescription,
     clientDescription: toStringValue(
-      pickValue(root, ["clientDescription", "client_description"])
+      lookup(["clientDescription", "client_description"])
     ) ?? shortDescription,
     colourList:
-      toStringValue(pickValue(root, ["colourList", "colorList"])) ??
+      toStringValue(lookup(["colourList", "colorList"])) ??
       colourAttribute,
     colourName:
-      toStringValue(pickValue(root, ["colourName", "colorName"])) ??
+      toStringValue(lookup(["colourName", "colorName"])) ??
       finishAttribute,
     productDescription: toStringValue(
-      pickValue(root, ["productDescription", "description", "product_description"])
+      lookup(["productDescription", "description", "product_description"])
     ),
     productSpecs:
-      toStringValue(pickValue(root, ["productSpecs"])) ?? productSpecs,
+      toStringValue(lookup(["productSpecs"])) ?? productSpecs,
     specificationSummaryText,
     specifications,
     attributes,
     family,
-    productUrl: toStringValue(pickValue(root, ["productUrl", "url"])),
+    productUrl: toStringValue(lookup(["productUrl", "url"])),
     vendorModel,
-    defaultQuantity: toNumberValue(pickValue(root, ["defaultQuantity", "quantity"])),
-    priceDisplay: toNumberValue(pickValue(root, ["priceDisplay"])),
-    optionAvailable: toStringValue(pickValue(root, ["optionAvailable", "available"])),
-    optionExpired: toStringValue(pickValue(root, ["optionExpired", "expired"])),
-    allHouseTypes: toBooleanValue(pickValue(root, ["allHouseTypes"])),
-    assembly: toBooleanValue(pickValue(root, ["assembly"])),
-    canEditColour: toBooleanValue(pickValue(root, ["canEditColour", "canEditColor"])),
+    defaultQuantity: toNumberValue(lookup(["defaultQuantity", "quantity"])),
+    priceDisplay: toNumberValue(lookup(["priceDisplay"])),
+    optionAvailable: toStringValue(lookup(["optionAvailable", "available"])),
+    optionExpired: toStringValue(lookup(["optionExpired", "expired"])),
+    allHouseTypes: toBooleanValue(lookup(["allHouseTypes"])),
+    assembly: toBooleanValue(lookup(["assembly"])),
+    canEditColour: toBooleanValue(lookup(["canEditColour", "canEditColor"])),
     colourRequired: toBooleanValue(
-      pickValue(root, ["colourRequired", "colorRequired"])
+      lookup(["colourRequired", "colorRequired"])
     ),
-    estimatingRequired: toBooleanValue(pickValue(root, ["estimatingRequired"])),
-    hiddenOption: toBooleanValue(pickValue(root, ["hiddenOption", "hidden"])),
-    optionOverrideable: toBooleanValue(pickValue(root, ["optionOverrideable"])),
-    quantityRequired: toBooleanValue(pickValue(root, ["quantityRequired"])),
+    estimatingRequired: toBooleanValue(lookup(["estimatingRequired"])),
+    hiddenOption: toBooleanValue(lookup(["hiddenOption", "hidden"])),
+    optionOverrideable: toBooleanValue(lookup(["optionOverrideable"])),
+    quantityRequired: toBooleanValue(lookup(["quantityRequired"])),
     selectionPlaceHolder: toNumberValue(
-      pickValue(root, ["selectionPlaceHolder", "selectionPlaceholder"])
+      lookup(["selectionPlaceHolder", "selectionPlaceholder"])
     ),
-    useHeroImage: toBooleanValue(pickValue(root, ["useHeroImage"])),
+    useHeroImage: toBooleanValue(lookup(["useHeroImage"])),
     visibleByMyHome: toBooleanValue(
-      pickValue(root, ["visibleByMyHome", "visibleMyHome"])
+      lookup(["visibleByMyHome", "visibleMyHome"])
     ),
-    visibleBySales: toBooleanValue(pickValue(root, ["visibleBySales", "visibleSales"])),
+    visibleBySales: toBooleanValue(lookup(["visibleBySales", "visibleSales"])),
     visibleBySelections: toBooleanValue(
-      pickValue(root, ["visibleBySelections", "visibleSelections"])
+      lookup(["visibleBySelections", "visibleSelections"])
     ),
-    attachments: extractAttachments(root),
+    attachments: extractAttachments(lookupRoots),
     relatedProducts,
     raw: root,
   };
