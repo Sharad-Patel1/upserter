@@ -121,6 +121,7 @@ export interface RunOptions {
   concurrency?: number;
   fileConcurrency?: number;
   resumeFromCheckpoint?: boolean;
+  skipFileUploadsForExistingTenderOptions?: boolean;
 }
 
 export interface AppliedRunOptions {
@@ -131,6 +132,7 @@ export interface AppliedRunOptions {
   concurrency: number;
   fileConcurrency: number;
   resumeFromCheckpoint: boolean;
+  skipFileUploadsForExistingTenderOptions: boolean;
 }
 
 export interface JsonPatchOperation {

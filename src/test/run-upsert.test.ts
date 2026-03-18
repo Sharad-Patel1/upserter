@@ -339,6 +339,7 @@ describe("TenderOptionUpsertService", () => {
         concurrency: 1,
         fileConcurrency: 1,
         resumeFromCheckpoint: false,
+        skipFileUploadsForExistingTenderOptions: true,
       },
       totals: createEmptyTotals(),
       checkpoint: {
@@ -369,6 +370,33 @@ describe("TenderOptionUpsertService", () => {
 
     expect(run.status).toBe("completed");
     expect(source.listOptions[0]?.startAfter).toBe("enriched/checkpoint.json");
+    expect(run.options.skipFileUploadsForExistingTenderOptions).toBe(true);
+  });
+
+  it("defaults to skipping file uploads for existing tender options", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const runStore = new RunStore({ baseDirectory: dir });
+
+    const source = new FakeSource({});
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client: new FakeClient(),
+      runStore,
+      uuid: () => "default-skip-files-run",
+    });
+
+    const queued = await service.queueRun({
+      dryRun: true,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.options.skipFileUploadsForExistingTenderOptions).toBe(true);
   });
 
   it("uploads files after creating a new tender option", async () => {
@@ -609,6 +637,282 @@ describe("TenderOptionUpsertService", () => {
     expect(uploadedFiles[0]?.path).toBe("https://cdn.example.com/files/drawing.png");
     // First list call returns [] (no existing), second is the fallback lookup
     expect(listCallCount).toBe(2);
+  });
+
+  it("skips file uploads for existing tender options when configured", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const auditStore = new SqliteAuditStore({
+      databasePath: join(dir, "audit.sqlite"),
+    });
+    const runStore = new RunStore({ baseDirectory: join(dir, "runs"), auditStore });
+
+    const source = new FakeSource({
+      "enriched/product-existing-files.json": {
+        externalRef: "SKU-EXISTING-FILES",
+        optionName: "Product Existing Files",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "spec.pdf",
+            url: "https://cdn.example.com/files/spec.pdf",
+          },
+        ],
+      },
+    });
+
+    let listPreferredCalls = 0;
+    let listFallbackCalls = 0;
+    let uploadCalls = 0;
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [
+          {
+            tenderOptionId: 42,
+            optionName: "Product Existing Files",
+            visibleBySales: true,
+            businessUnit: { businessUnitId: 1 },
+            resourceCode: { resourceCodeId: 5 },
+            tenderOptionCategory: { tenderOptionCategoryId: 10 },
+          },
+        ];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        listPreferredCalls += 1;
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        listFallbackCalls += 1;
+        return [];
+      },
+      async uploadTenderOptionFile(): Promise<Record<string, unknown>> {
+        uploadCalls += 1;
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      auditStore,
+      uuid: () => "run-skip-existing-files",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+      skipFileUploadsForExistingTenderOptions: true,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.items[0]?.optionId).toBe(42);
+    expect(run.items[0]?.files).toEqual({
+      listedExisting: 0,
+      uploaded: 0,
+      skippedExisting: 0,
+      failed: 0,
+      wouldUpload: 0,
+    });
+    expect(listPreferredCalls).toBe(0);
+    expect(listFallbackCalls).toBe(0);
+    expect(uploadCalls).toBe(0);
+
+    const detail = auditStore.getRunItemDetail(
+      queued.runId,
+      "enriched/product-existing-files.json",
+    );
+    expect(
+      detail.stepEvents.some(
+        (entry) => entry.event === "upsert.files.skipped_for_existing_option",
+      ),
+    ).toBe(true);
+    expect(
+      detail.fileSyncAttempts.some(
+        (entry) =>
+          entry.status === "skipped_existing_option_uploads_disabled",
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves file uploads for existing tender options when explicitly disabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const runStore = new RunStore({ baseDirectory: dir });
+
+    const source = new FakeSource({
+      "enriched/product-existing-upload.json": {
+        externalRef: "SKU-EXISTING-UPLOAD",
+        optionName: "Product Existing Upload",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "spec.pdf",
+            url: "https://cdn.example.com/files/spec.pdf",
+          },
+        ],
+      },
+    });
+
+    const uploadedFiles: UploadFileRequest[] = [];
+    let listPreferredCalls = 0;
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [
+          {
+            tenderOptionId: 55,
+            optionName: "Old Existing Upload",
+            visibleBySales: true,
+            businessUnit: { businessUnitId: 1 },
+            resourceCode: { resourceCodeId: 5 },
+            tenderOptionCategory: { tenderOptionCategoryId: 10 },
+          },
+        ];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        listPreferredCalls += 1;
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(request: UploadFileRequest): Promise<Record<string, unknown>> {
+        uploadedFiles.push(request);
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      uuid: () => "run-existing-upload-enabled",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: false,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+      skipFileUploadsForExistingTenderOptions: false,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.totals.filesUploaded).toBe(1);
+    expect(run.items[0]?.files.uploaded).toBe(1);
+    expect(listPreferredCalls).toBe(1);
+    expect(uploadedFiles).toHaveLength(1);
+    expect(uploadedFiles[0]?.optionId).toBe(55);
+  });
+
+  it("reports zero pending uploads during dry run when existing option uploads are skipped", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "upserter-usecase-"));
+    const runStore = new RunStore({ baseDirectory: dir });
+
+    const source = new FakeSource({
+      "enriched/product-existing-dry-run.json": {
+        externalRef: "SKU-EXISTING-DRY-RUN",
+        optionName: "Product Existing Dry Run",
+        categoryId: 10,
+        attachments: [
+          {
+            fileName: "spec.pdf",
+            url: "https://cdn.example.com/files/spec.pdf",
+          },
+        ],
+      },
+    });
+
+    let uploadCalls = 0;
+    let listPreferredCalls = 0;
+
+    const client: TenderOptionUpsertClient = {
+      async listTenderOptionsByExternalRef(): Promise<Record<string, unknown>[]> {
+        return [
+          {
+            tenderOptionId: 91,
+            optionName: "Old Existing Dry Run",
+            visibleBySales: true,
+            businessUnit: { businessUnitId: 1 },
+            resourceCode: { resourceCodeId: 5 },
+            tenderOptionCategory: { tenderOptionCategoryId: 10 },
+          },
+        ];
+      },
+      async createTenderOption(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionJsonPatch(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async patchTenderOptionMerge(): Promise<Record<string, unknown>> {
+        return {};
+      },
+      async listTenderOptionFilesPreferred(): Promise<ExistingRemoteFile[]> {
+        listPreferredCalls += 1;
+        return [];
+      },
+      async listTenderOptionFilesFallback(): Promise<ExistingRemoteFile[]> {
+        return [];
+      },
+      async uploadTenderOptionFile(): Promise<Record<string, unknown>> {
+        uploadCalls += 1;
+        return {};
+      },
+    };
+
+    const service = new TenderOptionUpsertService({
+      env,
+      source,
+      client,
+      runStore,
+      uuid: () => "run-existing-dry-run-skip",
+      now: () => new Date("2026-02-18T12:00:00.000Z"),
+    });
+
+    const queued = await service.queueRun({
+      dryRun: true,
+      prefix: "enriched/**/*.json",
+      concurrency: 1,
+      fileConcurrency: 1,
+      skipFileUploadsForExistingTenderOptions: true,
+    });
+
+    const run = await waitForRun(runStore, queued.runId);
+
+    expect(run.status).toBe("completed");
+    expect(run.items[0]?.files.wouldUpload).toBe(0);
+    expect(run.items[0]?.files.uploaded).toBe(0);
+    expect(listPreferredCalls).toBe(0);
+    expect(uploadCalls).toBe(0);
   });
 
   it("persists create-path artifacts and file uploads in SQLite audit storage", async () => {

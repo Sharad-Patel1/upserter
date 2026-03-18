@@ -44,6 +44,18 @@ interface ProcessItemResult {
   parsed: boolean;
 }
 
+interface SyncFilesInput {
+  runId: string;
+  optionId?: number;
+  itemKey: string;
+  externalRef?: string;
+  attachments: NormalizedAttachment[];
+  dryRun: boolean;
+  fileConcurrency: number;
+  optionAlreadyExisted: boolean;
+  skipFileUploadsForExistingTenderOptions: boolean;
+}
+
 type RunStreamListener = (event: RunStreamEvent) => void;
 
 const FAR_FUTURE_ISO = "9999-12-31T23:59:59Z";
@@ -857,6 +869,7 @@ export class TenderOptionUpsertService {
         externalRef: product.externalRef,
         step: "lookup.existing",
       }));
+      const optionAlreadyExisted = existing.length > 0;
       this.recordArtifact({
         runId,
         itemKey: key,
@@ -1199,6 +1212,9 @@ export class TenderOptionUpsertService {
         attachments: product.attachments,
         dryRun: options.dryRun,
         fileConcurrency: options.fileConcurrency,
+        optionAlreadyExisted,
+        skipFileUploadsForExistingTenderOptions:
+          options.skipFileUploadsForExistingTenderOptions,
       });
 
       fileSummary.listedExisting = syncSummary.listedExisting;
@@ -1299,15 +1315,7 @@ export class TenderOptionUpsertService {
     }
   }
 
-  private async syncFiles(input: {
-    runId: string;
-    optionId?: number;
-    itemKey: string;
-    externalRef?: string;
-    attachments: NormalizedAttachment[];
-    dryRun: boolean;
-    fileConcurrency: number;
-  }): Promise<FileSyncSummary> {
+  private async syncFiles(input: SyncFilesInput): Promise<FileSyncSummary> {
     const summary = createFileSyncSummary();
 
     if (input.attachments.length === 0) {
@@ -1325,6 +1333,9 @@ export class TenderOptionUpsertService {
       data: {
         attachmentCount: input.attachments.length,
         dryRun: input.dryRun,
+        optionAlreadyExisted: input.optionAlreadyExisted,
+        skipFileUploadsForExistingTenderOptions:
+          input.skipFileUploadsForExistingTenderOptions,
       },
     });
 
@@ -1348,6 +1359,40 @@ export class TenderOptionUpsertService {
       this.logger.warn("Skipping attachments without absolute HTTP(S) source URL", {
         invalidPathCount,
       });
+    }
+
+    if (
+      input.optionAlreadyExisted &&
+      input.skipFileUploadsForExistingTenderOptions
+    ) {
+      for (const attachment of attachmentsWithPath) {
+        this.recordFileSyncAttempt({
+          runId: input.runId,
+          itemKey: input.itemKey,
+          externalRef: input.externalRef,
+          optionId: input.optionId,
+          stage: "files.skipped",
+          status: "skipped_existing_option_uploads_disabled",
+          fileName: attachment.fileName,
+          sourceUrl: resolveAttachmentSourceUrl(attachment),
+          request: attachment,
+        });
+      }
+      this.recordItemEvent({
+        runId: input.runId,
+        itemKey: input.itemKey,
+        externalRef: input.externalRef,
+        optionId: input.optionId,
+        level: "info",
+        event: "upsert.files.skipped_for_existing_option",
+        message: "Skipped attachment synchronization for existing TenderOption",
+        data: {
+          attachmentCount: attachmentsWithPath.length,
+          invalidPathCount,
+          reason: "existing option + uploads disabled by run option",
+        },
+      });
+      return summary;
     }
 
     if (input.optionId === undefined) {
@@ -1735,6 +1780,8 @@ export class TenderOptionUpsertService {
       concurrency: clampPositiveInteger(input.concurrency, 5),
       fileConcurrency: clampPositiveInteger(input.fileConcurrency, 2),
       resumeFromCheckpoint,
+      skipFileUploadsForExistingTenderOptions:
+        input.skipFileUploadsForExistingTenderOptions !== false,
     };
   }
 }

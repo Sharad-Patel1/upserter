@@ -54,6 +54,7 @@ export function createUpsertRoutes(
             concurrency: t.Optional(t.Number({ minimum: 1 })),
             fileConcurrency: t.Optional(t.Number({ minimum: 1 })),
             resumeFromCheckpoint: t.Optional(t.Boolean()),
+            skipFileUploadsForExistingTenderOptions: t.Optional(t.Boolean()),
           })
         ),
       }

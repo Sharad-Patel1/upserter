@@ -27,6 +27,7 @@ describe("ClickHomeClient", () => {
         concurrency: 1,
         fileConcurrency: 1,
         resumeFromCheckpoint: false,
+        skipFileUploadsForExistingTenderOptions: true,
       },
       totals: createEmptyTotals(),
       checkpoint: {},
